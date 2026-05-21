@@ -3,6 +3,7 @@
 	"version": "1.0.0",
 	"private": true,
 	"type": "module",
+	"packageManager": "pnpm@11.0.8",
 	"description": "GitHub Action that waits for a Vercel deployment to be ready in CI by polling GitHub's Deployments API.",
 	"license": "MIT",
 	"repository": {
@@ -23,6 +24,11 @@
 		"esbuild": "^0.28.0",
 		"typescript": "^6.0.3",
 		"vitest": "^4.1.7"
+	},
+	"pnpm": {
+		"overrides": {
+			"vite": "8.0.13"
+		}
 	},
 	"engines": {
 		"node": ">=24"
