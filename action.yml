@@ -1,5 +1,5 @@
 name: 'Wait for Vercel Deployment'
-description: 'Wait for a Vercel deployment to be ready in CI by polling GitHub'\''s Deployments API instead of the Vercel API.'
+description: "Wait for a Vercel deployment to be ready in CI by polling GitHub's Deployments API."
 author: 'Vercel'
 branding:
   icon: 'clock'
