@@ -72,9 +72,9 @@ inputs:
   github-token:
     description: |
       GitHub token used to query the Deployments / Statuses APIs.
-      Defaults to `${{ github.token }}`. The workflow's `permissions:`
-      block must include `deployments: read` (always) and
-      `statuses: read` (when resolving deployment ID).
+      Defaults to the job's automatic GITHUB_TOKEN. The workflow's
+      `permissions:` block must include `deployments: read` (always)
+      and `statuses: read` (when resolving deployment ID).
     required: false
     default: ${{ github.token }}
 
