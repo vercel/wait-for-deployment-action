@@ -1,0 +1,30 @@
+{
+	"name": "wait-for-deployment-action",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"description": "GitHub Action that waits for a Vercel deployment to be ready in CI by polling GitHub's Deployments API.",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/vercel/wait-for-deployment-action.git"
+	},
+	"scripts": {
+		"build": "esbuild src/main.ts --bundle --outfile=dist/index.js --platform=node --target=node24 --format=esm",
+		"typecheck": "tsc --noEmit",
+		"lint": "biome check --write",
+		"format": "biome format --write",
+		"test": "vitest run",
+		"test:watch": "vitest"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.15",
+		"@types/node": "^25.9.1",
+		"esbuild": "^0.28.0",
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.7"
+	},
+	"engines": {
+		"node": ">=24"
+	}
+}

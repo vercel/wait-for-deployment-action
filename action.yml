@@ -1,0 +1,91 @@
+name: 'Wait for Vercel Deployment'
+description: 'Wait for a Vercel deployment to be ready in CI by polling GitHub'\''s Deployments API instead of the Vercel API.'
+author: 'Vercel'
+branding:
+  icon: 'clock'
+  color: 'gray-dark'
+
+inputs:
+  project-slug:
+    description: |
+      Optional. Set this when the same repository serves multiple Vercel
+      projects (e.g. monorepos). Vercel suffixes the GitHub Deployment
+      environment and commit-status context with the project slug in
+      that case ("Preview – my-project" / "Vercel – my-project"); pass
+      the slug here to disambiguate.
+
+      Omit for the common single-project case where Vercel uses the bare
+      "Preview" / "Production" environment names and the bare "Vercel"
+      commit-status context.
+    required: false
+    default: ''
+  environment:
+    description: |
+      Which Vercel deployment environment to wait for: "production" or
+      "preview". Defaults to "preview".
+
+      Ignored when `environment-name` is set.
+    required: false
+    default: 'preview'
+  environment-name:
+    description: |
+      Optional advanced escape hatch. Match the GitHub Deployment
+      environment name exactly (e.g. "Preview", "Production",
+      "Preview – my-project"). When set, this takes precedence over the
+      auto-composed name derived from `environment` + `project-slug`.
+
+      You normally don't need this — set `project-slug` instead.
+    required: false
+    default: ''
+  status-context:
+    description: |
+      Optional advanced escape hatch. Match the commit-status context
+      that the deployment ID is read from (e.g. "Vercel" or
+      "Vercel – my-project"). When set, this takes precedence over the
+      auto-composed value.
+
+      Set to the empty string to skip deployment-id resolution entirely.
+    required: false
+    default: ''
+  require-deployment-id:
+    description: |
+      Whether to fail when the Vercel deployment ID cannot be resolved
+      from the commit status. Defaults to "true". Set to "false" if you
+      only need `deployment-url` and don't care about `deployment-id`.
+    required: false
+    default: 'true'
+  timeout:
+    description: 'Maximum time to wait, in seconds. Defaults to 600 (10 minutes).'
+    required: false
+    default: '600'
+  check-interval:
+    description: 'How often to poll, in seconds. Defaults to 10.'
+    required: false
+    default: '10'
+  sha:
+    description: |
+      Optional. The commit SHA to look up the deployment for. Defaults
+      to the PR head SHA (for `pull_request` events), the pushed SHA
+      (for `push` events), or `$GITHUB_SHA` otherwise.
+    required: false
+    default: ''
+  github-token:
+    description: |
+      GitHub token used to query the Deployments / Statuses APIs.
+      Defaults to `${{ github.token }}`. The workflow's `permissions:`
+      block must include `deployments: read` (always) and
+      `statuses: read` (when resolving deployment ID).
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  deployment-url:
+    description: 'URL of the ready Vercel deployment (the GitHub Deployment status `environment_url`, falling back to `target_url`).'
+  deployment-id:
+    description: 'Vercel deployment ID resolved from the commit status (e.g. `dpl_8z4XjwrRQGYwcDKFMLN5BeTvGhXu`). Empty if resolution failed and `require-deployment-id` is "false".'
+  deployment-state:
+    description: 'The terminal GitHub Deployment status state ("success" or "inactive").'
+
+runs:
+  using: 'node24'
+  main: 'dist/index.js'
