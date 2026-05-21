@@ -44,7 +44,9 @@ inputs:
       "Vercel – my-project"). When set, this takes precedence over the
       auto-composed value.
 
-      Set to the empty string to skip deployment-id resolution entirely.
+      To skip deployment-id resolution entirely, set
+      `require-deployment-id: false` and ignore the `deployment-id`
+      output.
     required: false
     default: ''
   require-deployment-id:

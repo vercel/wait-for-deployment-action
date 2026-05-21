@@ -62,10 +62,9 @@ function resolveConfig() {
     );
   }
   const envNameOverride = getInput("environment-name").trim();
-  const statusContextOverride = getInput("status-context");
-  const statusContextProvided = isInputProvided("status-context");
+  const statusContextOverride = getInput("status-context").trim();
   const environmentName = envNameOverride || composeEnvironmentName(environment, projectSlug);
-  const statusContext = statusContextProvided ? statusContextOverride : composeStatusContext(projectSlug);
+  const statusContext = statusContextOverride || composeStatusContext(projectSlug);
   const requireDeploymentId = parseBool(
     getInput("require-deployment-id"),
     true
@@ -96,10 +95,6 @@ function composeEnvironmentName(environment, projectSlug) {
 }
 function composeStatusContext(projectSlug) {
   return projectSlug ? `Vercel \u2013 ${projectSlug}` : "Vercel";
-}
-function isInputProvided(name) {
-  const envName = `INPUT_${name.replace(/ /g, "_").toUpperCase()}`;
-  return Object.hasOwn(process.env, envName);
 }
 function parseBool(raw, fallback) {
   const v = raw.trim().toLowerCase();

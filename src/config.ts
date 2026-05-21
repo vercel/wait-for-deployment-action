@@ -34,19 +34,18 @@ export function resolveConfig(): Config {
 	}
 
 	const envNameOverride = core.getInput('environment-name').trim();
-	const statusContextOverride = core.getInput('status-context');
-	const statusContextProvided = isInputProvided('status-context');
+	const statusContextOverride = core.getInput('status-context').trim();
 
 	const environmentName =
 		envNameOverride || composeEnvironmentName(environment, projectSlug);
 
-	// `status-context` semantics:
-	// - not provided at all → use auto-compose default (Vercel / Vercel – slug)
-	// - provided as empty string → opt out of deployment-id resolution entirely
-	// - provided as non-empty string → use as-is
-	const statusContext = statusContextProvided
-		? statusContextOverride
-		: composeStatusContext(projectSlug);
+	// `status-context` follows the same empty-string-means-auto convention
+	// as `environment-name`: empty (the action.yml default) → compose from
+	// project-slug; non-empty → use the override as-is. Consumers that don't
+	// want deployment-id resolution at all should set `require-deployment-id:
+	// false` and not read the `deployment-id` output.
+	const statusContext =
+		statusContextOverride || composeStatusContext(projectSlug);
 
 	const requireDeploymentId = parseBool(
 		core.getInput('require-deployment-id'),
@@ -88,16 +87,6 @@ export function composeEnvironmentName(
 
 export function composeStatusContext(projectSlug: string): string {
 	return projectSlug ? `Vercel – ${projectSlug}` : 'Vercel';
-}
-
-function isInputProvided(name: string): boolean {
-	// `core.getInput` returns '' for both unset and explicitly-empty inputs,
-	// so we have to look at the underlying env var to distinguish them.
-	// GitHub Actions uppercases the input name and replaces spaces with `_`
-	// (dashes are preserved); see
-	// https://docs.github.com/en/actions/sharing-automations/creating-actions/metadata-syntax-for-github-actions#example-specifying-inputs
-	const envName = `INPUT_${name.replace(/ /g, '_').toUpperCase()}`;
-	return Object.hasOwn(process.env, envName);
 }
 
 function parseBool(raw: string, fallback: boolean): boolean {
