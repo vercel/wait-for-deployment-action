@@ -95,10 +95,24 @@ describe('resolveConfig', () => {
 		expect(cfg.statusContext).toBe('My Status');
 	});
 
-	it('treats explicit empty status-context as opt-out', () => {
-		setInputs({ 'status-context': '' });
+	it('treats explicit empty status-context as auto (matches action.yml default)', () => {
+		// GitHub Actions always injects INPUT_STATUS-CONTEXT='' for inputs
+		// that the consumer didn't pass (the empty `default: ''` in
+		// action.yml). The action treats that the same as "not provided"
+		// and auto-composes from `project-slug`.
+		setInputs({ 'status-context': '', 'project-slug': 'my-app' });
 		const cfg = resolveConfig();
-		expect(cfg.statusContext).toBe('');
+		expect(cfg.statusContext).toBe('Vercel – my-app');
+	});
+
+	it('auto-composes status-context when project-slug is set and override is empty', () => {
+		// Mirrors what every consumer hits at runtime: they only pass
+		// project-slug; the runner injects empty strings for the
+		// environment-name / status-context overrides.
+		setInputs({ 'project-slug': 'example-workflow' });
+		const cfg = resolveConfig();
+		expect(cfg.statusContext).toBe('Vercel – example-workflow');
+		expect(cfg.environmentName).toBe('Preview – example-workflow');
 	});
 
 	it('uses production env name', () => {
