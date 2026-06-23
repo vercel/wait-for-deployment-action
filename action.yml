@@ -52,8 +52,8 @@ inputs:
   require-deployment-id:
     description: |
       Whether to fail when the Vercel deployment ID cannot be resolved
-      from the commit status. Defaults to "true". Set to "false" if you
-      only need `deployment-url` and don't care about `deployment-id`.
+      Defaults to "true". Set to "false" if you only need
+      `deployment-url` and don't care about `deployment-id`.
     required: false
     default: 'true'
   timeout:
@@ -76,15 +76,23 @@ inputs:
       GitHub token used to query the Deployments / Statuses APIs.
       Defaults to the job's automatic GITHUB_TOKEN. The workflow's
       `permissions:` block must include `deployments: read` (always)
-      and `statuses: read` (when resolving deployment ID).
+      and `statuses: read` (when resolving deployment ID without vercel-token).
     required: false
     default: ${{ github.token }}
+  vercel-token:
+    description: 'Optional Vercel access token used to resolve deployment-id from the exact deployment URL.'
+    required: false
+    default: ''
+  vercel-team-id:
+    description: 'Optional Vercel team ID used to scope the deployment lookup.'
+    required: false
+    default: ''
 
 outputs:
   deployment-url:
     description: 'URL of the ready Vercel deployment (the GitHub Deployment status `environment_url`, falling back to `target_url`).'
   deployment-id:
-    description: 'Vercel deployment ID resolved from the commit status (e.g. `dpl_8z4XjwrRQGYwcDKFMLN5BeTvGhXu`). Empty if resolution failed and `require-deployment-id` is "false".'
+    description: 'Vercel deployment ID (e.g. `dpl_8z4XjwrRQGYwcDKFMLN5BeTvGhXu`). Empty if resolution failed and `require-deployment-id` is "false".'
   deployment-state:
     description: 'The terminal GitHub Deployment status state ("success" or "inactive").'
 

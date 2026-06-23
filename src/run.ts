@@ -6,6 +6,14 @@ import {
 	type GitHubDeploymentStatus,
 	resolveDeploymentId,
 } from './github.ts';
+import {
+	resolveDeploymentIdFromUrl,
+	type VercelDeploymentIdSource,
+} from './vercel.ts';
+
+type DeploymentIdSource =
+	| VercelDeploymentIdSource
+	| { type: 'github'; context: string };
 
 const sleep = (ms: number) =>
 	new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -40,9 +48,7 @@ export async function run(deps: RunDeps = {}): Promise<void> {
 			`Looking for GitHub deployment in environment "${config.environmentName}"`,
 		);
 		if (config.statusContext) {
-			core.info(
-				`Will resolve deployment ID from "${config.statusContext}" commit status`,
-			);
+			core.info('Will resolve deployment ID');
 		} else {
 			core.info('Deployment ID resolution disabled (status-context is empty)');
 		}
@@ -134,16 +140,26 @@ export async function run(deps: RunDeps = {}): Promise<void> {
 				continue;
 			}
 
-			// 3. Resolve the provider deployment ID from the commit status.
+			// 3. Resolve the provider deployment ID.
+			const source: DeploymentIdSource = config.vercelToken
+				? {
+						type: 'vercel',
+						token: config.vercelToken,
+						teamId: config.vercelTeamId || null,
+					}
+				: { type: 'github', context: config.statusContext };
 			let deploymentId = '';
 			if (config.statusContext) {
 				try {
-					const resolved = await resolveDeploymentId(client, {
-						owner: config.owner,
-						repo: config.repo,
-						sha: config.sha,
-						context: config.statusContext,
-					});
+					const resolved =
+						source.type === 'vercel'
+							? await resolveDeploymentIdFromUrl(deploymentUrl, source)
+							: await resolveDeploymentId(client, {
+									owner: config.owner,
+									repo: config.repo,
+									sha: config.sha,
+									context: source.context,
+								});
 					if (resolved) {
 						deploymentId = resolved;
 					} else if (config.requireDeploymentId) {
