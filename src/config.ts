@@ -53,8 +53,9 @@ export function resolveConfig(): Config {
 	// `status-context` follows the same empty-string-means-auto convention
 	// as `environment-name`: empty (the action.yml default) → compose from
 	// project-slug; non-empty → use the override as-is. Consumers that don't
-	// want deployment-id resolution at all should set `require-deployment-id:
-	// false` and not read the `deployment-id` output.
+	// need the ID should set `require-deployment-id: false` and not read the
+	// `deployment-id` output — resolution is still attempted, but a failure
+	// only warns.
 	const statusContext =
 		statusContextOverride || composeStatusContext(projectSlug);
 

@@ -54,9 +54,10 @@ inputs:
 
       Only consulted when `vercel-token` is not set.
 
-      To skip deployment-id resolution entirely, set
+      If you only need `deployment-url`, set
       `require-deployment-id: false` and ignore the `deployment-id`
-      output.
+      output. Resolution is still attempted (best effort), so the
+      `statuses: read` permission is still worth granting.
     required: false
     default: ''
   require-deployment-id:
@@ -64,6 +65,11 @@ inputs:
       Whether to fail when the Vercel deployment ID cannot be resolved.
       Defaults to "true". Set to "false" if you only need
       `deployment-url` and don't care about `deployment-id`.
+
+      This downgrades a failed resolution to a warning; it does not skip
+      resolution. The ID is still looked up and still emitted when it
+      can be determined, so consumers reading it opportunistically keep
+      working.
 
       Note that this does not suppress an environment mismatch: when
       `vercel-token` is set and the resolved deployment turns out to be

@@ -78,7 +78,9 @@ With a token the ID is resolved by looking the deployment **URL** up against the
 
 ### Without a token
 
-The commit-status fallback is unchanged, so existing workflows keep working. The action warns that the ID may not match the URL, and escalates that warning when it detects the commit really was deployed to both environments of the project. If you only need `deployment-url`, set `require-deployment-id: false` and ignore `deployment-id`.
+The commit-status fallback is unchanged, so existing workflows keep working. Since the status is only ambiguous when the commit went to more than one environment, the action checks whether it did: if so it warns that `deployment-id` may name the other environment's deployment, and otherwise it just notes which status it read. A hand-written `environment-name` has no derivable counterpart environment, so the check can't run and the warning is unconditional.
+
+If you only need `deployment-url`, set `require-deployment-id: false` and ignore `deployment-id`. That downgrades a failed resolution to a warning rather than skipping the lookup, so the ID is still emitted when it can be determined.
 
 ## Permissions
 
@@ -134,7 +136,7 @@ The defaults follow Vercel's GitHub integration's naming.
 2. Polls `GET /repos/{owner}/{repo}/deployments/{id}/statuses` until the latest status is terminal (`success`, `inactive`, `error`, or `failure`).
 3. Resolves the deployment ID for the URL from step 2:
    - **With `vercel-token`:** `GET https://api.vercel.com/v13/deployments/<url-host>` (the endpoint takes a deployment host in place of an ID) and uses the returned `id`. The returned `target` is checked against `environment` — `production` for production, anything else (`null`, which is how the API spells "preview", plus `staging` and custom environments) for preview — and a mismatch fails the job.
-   - **Without one:** fetches `GET /repos/{owner}/{repo}/commits/{sha}/status`, finds the status whose context is `<status-context>` (default `Vercel`), and takes the last path segment of its `target_url`, prepending `dpl_`. Because that status is shared across environments, the action first checks whether the commit was also deployed to the project's other environment and warns accordingly.
+   - **Without one:** fetches `GET /repos/{owner}/{repo}/commits/{sha}/status`, finds the status whose context is `<status-context>` (default `Vercel`), and takes the last path segment of its `target_url`, prepending `dpl_`. Because that status is shared across environments, the action first checks whether the commit was also deployed to the project's other environment, and warns when it was — or when the check can't run.
 
 Setting `environment-name` disables the environment check in the `vercel-token` path: a hand-written environment name can't be mapped back to a Vercel target, so there is nothing sound to compare against.
 

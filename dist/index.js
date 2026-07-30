@@ -317,7 +317,7 @@ async function run(deps = {}) {
       );
     } else if (config.statusContext) {
       info(
-        `Will resolve the deployment ID from the "${config.statusContext}" commit status`
+        `Will resolve the deployment ID from the "${config.statusContext}" commit status${config.requireDeploymentId ? "" : " (best effort: `require-deployment-id` is false, so a failure to resolve only warns)"}`
       );
     } else {
       info("Deployment ID resolution disabled (status-context is empty)");
@@ -454,7 +454,7 @@ async function resolveDeploymentIdFor(client, config, deploymentUrl, vercelFetch
     return deployment.id;
   }
   if (!config.statusContext) return "";
-  await warnAboutCommitStatusAmbiguity(client, config);
+  await noteCommitStatusAmbiguity(client, config);
   return await resolveDeploymentId(client, {
     owner: config.owner,
     repo: config.repo,
@@ -462,31 +462,36 @@ async function resolveDeploymentIdFor(client, config, deploymentUrl, vercelFetch
     context: config.statusContext
   }) ?? "";
 }
-async function warnAboutCommitStatusAmbiguity(client, config) {
-  const counterpart = counterpartEnvironmentName(config.environmentName);
+async function noteCommitStatusAmbiguity(client, config) {
+  const shared = `Vercel keeps a single "${config.statusContext}" commit status per project rather than per environment, overwritten by whichever deployment finished last, so the deployment-id read from it can belong to a different deployment than deployment-url.`;
   const advice = "Pass `vercel-token` (plus `vercel-team-id` for team-owned projects) to resolve the ID from `deployment-url` instead, which cannot disagree.";
-  if (counterpart) {
-    try {
-      const alsoDeployed = await client.listDeployments({
-        owner: config.owner,
-        repo: config.repo,
-        sha: config.sha,
-        environment: counterpart
-      });
-      if (alsoDeployed.length > 0) {
-        warning(
-          `Commit ${config.sha} was deployed to both "${config.environmentName}" and "${counterpart}". Vercel keeps a single "${config.statusContext}" commit status per project, overwritten by whichever deployment finished last, so the deployment-id read from it may belong to the ${counterpart} deployment rather than the one at deployment-url. ${advice}`
-        );
-        return;
-      }
-    } catch (err) {
-      info(
-        `Could not check whether ${config.sha} was also deployed to "${counterpart}": ${err.message}`
-      );
-    }
+  const counterpart = counterpartEnvironmentName(config.environmentName);
+  if (!counterpart) {
+    warning(`${shared} ${advice}`);
+    return;
   }
-  warning(
-    `Resolving deployment-id from the "${config.statusContext}" commit status. Vercel keeps one such status per project rather than per environment, so if this commit is deployed to more than one environment the ID can belong to a different deployment than deployment-url. ${advice}`
+  let alsoDeployed;
+  try {
+    alsoDeployed = await client.listDeployments({
+      owner: config.owner,
+      repo: config.repo,
+      sha: config.sha,
+      environment: counterpart
+    });
+  } catch (err) {
+    warning(
+      `${shared} Could not check whether ${config.sha} was also deployed to "${counterpart}": ${err.message}. ${advice}`
+    );
+    return;
+  }
+  if (alsoDeployed.length > 0) {
+    warning(
+      `Commit ${config.sha} was deployed to both "${config.environmentName}" and "${counterpart}". ${shared} ${advice}`
+    );
+    return;
+  }
+  info(
+    `Resolving deployment-id from the "${config.statusContext}" commit status. ${config.sha} was not deployed to "${counterpart}", so that status is unambiguous for this commit. ${advice}`
   );
 }
 

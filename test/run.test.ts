@@ -281,27 +281,31 @@ describe('run', () => {
 			expect(warnings.join('\n')).toMatch(/Pass `vercel-token`/);
 		});
 
-		it('warns more mildly when the SHA is in one environment only', async () => {
+		it('does not warn at all when the SHA is in one environment only', async () => {
+			// The hazard needs the commit to span environments. Having just
+			// checked and ruled that out, a warning annotation would be noise.
 			const h = harness({ environments: ['Production – my-app'] });
 
 			await run({ client: h.client });
 
 			expect(failures).toEqual([]);
-			const joined = warnings.join('\n');
-			expect(joined).toMatch(/one such status per project/);
-			expect(joined).not.toMatch(/was deployed to both/);
+			expect(warnings).toEqual([]);
+			expect(infos.join('\n')).toMatch(
+				/was not deployed to "Preview – my-app", so that status is unambiguous/,
+			);
 		});
 
 		it('still resolves when the counterpart-environment check itself errors', async () => {
 			// The ambiguity check is advisory; a failing GitHub call must not
-			// take the run down with it.
+			// take the run down with it — but it does leave the hazard unruled
+			// out, so it warns.
 			const h = harness({ failEnvironments: ['Preview – my-app'] });
 
 			await run({ client: h.client });
 
 			expect(failures).toEqual([]);
 			expect(outputs['deployment-id']).toBe(PREVIEW_ID);
-			expect(infos.join('\n')).toMatch(
+			expect(warnings.join('\n')).toMatch(
 				/Could not check whether .* was also deployed to "Preview – my-app"/,
 			);
 		});
@@ -318,6 +322,25 @@ describe('run', () => {
 			expect(
 				h.githubCalls.filter((u) => u.includes('/deployments?')),
 			).toHaveLength(1);
+			// Nothing ruled the hazard out, so the warning stands.
+			expect(warnings.join('\n')).toMatch(
+				/keeps a single "Vercel – my-app" commit status per project/,
+			);
+		});
+
+		it('says up front that the ID is best effort under require-deployment-id: false', async () => {
+			// `require-deployment-id: false` downgrades a failure to a warning,
+			// it does not skip the lookup — the log should not imply otherwise.
+			const h = harness();
+			setInputs({ 'require-deployment-id': 'false' });
+
+			await run({ client: h.client });
+
+			expect(failures).toEqual([]);
+			expect(outputs['deployment-id']).toBe(PREVIEW_ID);
+			expect(infos.join('\n')).toMatch(
+				/commit status \(best effort: `require-deployment-id` is false/,
+			);
 		});
 	});
 });

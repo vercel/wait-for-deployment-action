@@ -58,7 +58,11 @@ export async function run(deps: RunDeps = {}): Promise<void> {
 			);
 		} else if (config.statusContext) {
 			core.info(
-				`Will resolve the deployment ID from the "${config.statusContext}" commit status`,
+				`Will resolve the deployment ID from the "${config.statusContext}" commit status${
+					config.requireDeploymentId
+						? ''
+						: ' (best effort: `require-deployment-id` is false, so a failure to resolve only warns)'
+				}`,
 			);
 		} else {
 			core.info('Deployment ID resolution disabled (status-context is empty)');
@@ -245,7 +249,7 @@ async function resolveDeploymentIdFor(
 	}
 
 	if (!config.statusContext) return '';
-	await warnAboutCommitStatusAmbiguity(client, config);
+	await noteCommitStatusAmbiguity(client, config);
 	return (
 		(await resolveDeploymentId(client, {
 			owner: config.owner,
@@ -257,41 +261,55 @@ async function resolveDeploymentIdFor(
 }
 
 /**
- * Warn that the commit-status fallback can name the wrong deployment, checking
- * first whether this commit actually was deployed to both environments of the
- * project — the precondition that makes the status ambiguous. That check is one
- * extra GitHub call and never fails the run.
+ * Report that the commit-status fallback can name the wrong deployment.
+ *
+ * The status is only actually ambiguous when this commit was deployed to more
+ * than one environment of the project, so the severity follows that check: a
+ * warning when the risk is real or can't be ruled out, and an informational
+ * line when it's ruled out — otherwise every tokenless run of a
+ * single-environment commit would carry a warning annotation for a hazard that
+ * was just checked and found absent. The check costs one extra GitHub call
+ * (`deployments: read`, already required) and never fails the run.
  */
-async function warnAboutCommitStatusAmbiguity(
+async function noteCommitStatusAmbiguity(
 	client: GitHubClient,
 	config: Config,
 ): Promise<void> {
-	const counterpart = counterpartEnvironmentName(config.environmentName);
+	const shared = `Vercel keeps a single "${config.statusContext}" commit status per project rather than per environment, overwritten by whichever deployment finished last, so the deployment-id read from it can belong to a different deployment than deployment-url.`;
 	const advice =
 		'Pass `vercel-token` (plus `vercel-team-id` for team-owned projects) to resolve the ID from `deployment-url` instead, which cannot disagree.';
 
-	if (counterpart) {
-		try {
-			const alsoDeployed = await client.listDeployments({
-				owner: config.owner,
-				repo: config.repo,
-				sha: config.sha,
-				environment: counterpart,
-			});
-			if (alsoDeployed.length > 0) {
-				core.warning(
-					`Commit ${config.sha} was deployed to both "${config.environmentName}" and "${counterpart}". Vercel keeps a single "${config.statusContext}" commit status per project, overwritten by whichever deployment finished last, so the deployment-id read from it may belong to the ${counterpart} deployment rather than the one at deployment-url. ${advice}`,
-				);
-				return;
-			}
-		} catch (err) {
-			core.info(
-				`Could not check whether ${config.sha} was also deployed to "${counterpart}": ${(err as Error).message}`,
-			);
-		}
+	const counterpart = counterpartEnvironmentName(config.environmentName);
+	// A hand-written `environment-name` has no derivable counterpart, so
+	// there's no cheap way to rule the hazard out.
+	if (!counterpart) {
+		core.warning(`${shared} ${advice}`);
+		return;
 	}
 
-	core.warning(
-		`Resolving deployment-id from the "${config.statusContext}" commit status. Vercel keeps one such status per project rather than per environment, so if this commit is deployed to more than one environment the ID can belong to a different deployment than deployment-url. ${advice}`,
+	let alsoDeployed: GitHubDeployment[];
+	try {
+		alsoDeployed = await client.listDeployments({
+			owner: config.owner,
+			repo: config.repo,
+			sha: config.sha,
+			environment: counterpart,
+		});
+	} catch (err) {
+		core.warning(
+			`${shared} Could not check whether ${config.sha} was also deployed to "${counterpart}": ${(err as Error).message}. ${advice}`,
+		);
+		return;
+	}
+
+	if (alsoDeployed.length > 0) {
+		core.warning(
+			`Commit ${config.sha} was deployed to both "${config.environmentName}" and "${counterpart}". ${shared} ${advice}`,
+		);
+		return;
+	}
+
+	core.info(
+		`Resolving deployment-id from the "${config.statusContext}" commit status. ${config.sha} was not deployed to "${counterpart}", so that status is unambiguous for this commit. ${advice}`,
 	);
 }
