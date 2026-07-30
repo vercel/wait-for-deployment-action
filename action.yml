@@ -24,6 +24,10 @@ inputs:
       Which Vercel deployment environment to wait for: "production" or
       "preview". Defaults to "preview".
 
+      When `vercel-token` is set, the resolved deployment's Vercel
+      target is verified against this value and the action fails if they
+      disagree.
+
       Ignored when `environment-name` is set.
     required: false
     default: 'preview'
@@ -33,6 +37,10 @@ inputs:
       environment name exactly (e.g. "Preview", "Production",
       "Preview – my-project"). When set, this takes precedence over the
       auto-composed name derived from `environment` + `project-slug`.
+
+      Setting this also disables the environment verification that
+      `vercel-token` otherwise performs, because the intended Vercel
+      target can no longer be derived from `environment`.
 
       You normally don't need this — set `project-slug` instead.
     required: false
@@ -44,6 +52,8 @@ inputs:
       "Vercel – my-project"). When set, this takes precedence over the
       auto-composed value.
 
+      Only consulted when `vercel-token` is not set.
+
       To skip deployment-id resolution entirely, set
       `require-deployment-id: false` and ignore the `deployment-id`
       output.
@@ -51,9 +61,15 @@ inputs:
     default: ''
   require-deployment-id:
     description: |
-      Whether to fail when the Vercel deployment ID cannot be resolved
+      Whether to fail when the Vercel deployment ID cannot be resolved.
       Defaults to "true". Set to "false" if you only need
       `deployment-url` and don't care about `deployment-id`.
+
+      Note that this does not suppress an environment mismatch: when
+      `vercel-token` is set and the resolved deployment turns out to be
+      in a different environment than `environment` asked for, the
+      action always fails, because that means `deployment-url` itself is
+      not the deployment you asked for.
     required: false
     default: 'true'
   timeout:
@@ -80,11 +96,32 @@ inputs:
     required: false
     default: ${{ github.token }}
   vercel-token:
-    description: 'Optional Vercel access token used to resolve deployment-id from the exact deployment URL.'
+    description: |
+      Optional Vercel access token. Strongly recommended.
+
+      When set, the deployment ID is resolved by looking up the
+      deployment URL against the Vercel API, so `deployment-id` and
+      `deployment-url` are guaranteed to describe the same deployment,
+      and the deployment's environment is verified against
+      `environment`.
+
+      Without it, the ID is parsed out of the "Vercel – <project>"
+      commit status, which Vercel maintains per project rather than per
+      environment: when one commit is deployed to several environments,
+      the ID can belong to a different deployment than
+      `deployment-url`.
+
+      Falls back to the `VERCEL_TOKEN` environment variable.
     required: false
     default: ''
   vercel-team-id:
-    description: 'Optional Vercel team ID used to scope the deployment lookup.'
+    description: |
+      Vercel team ID (`team_...`) that owns the project. Required
+      alongside `vercel-token` for team-owned projects: the Vercel API
+      answers 404 for a team's deployments when the request isn't scoped
+      to that team.
+
+      Falls back to the `VERCEL_TEAM_ID` environment variable.
     required: false
     default: ''
 
@@ -92,7 +129,7 @@ outputs:
   deployment-url:
     description: 'URL of the ready Vercel deployment (the GitHub Deployment status `environment_url`, falling back to `target_url`).'
   deployment-id:
-    description: 'Vercel deployment ID (e.g. `dpl_8z4XjwrRQGYwcDKFMLN5BeTvGhXu`). Empty if resolution failed and `require-deployment-id` is "false".'
+    description: 'Vercel deployment ID of the deployment serving `deployment-url` (e.g. `dpl_8z4XjwrRQGYwcDKFMLN5BeTvGhXu`). Empty if resolution failed and `require-deployment-id` is "false".'
   deployment-state:
     description: 'The terminal GitHub Deployment status state ("success" or "inactive").'
 

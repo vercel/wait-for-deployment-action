@@ -5,7 +5,16 @@ export interface Config {
 	owner: string;
 	repo: string;
 	sha: string;
+	/** The logical environment asked for, before name composition. */
+	environment: 'production' | 'preview';
 	environmentName: string;
+	/**
+	 * Whether `environmentName` came from the `environment-name` escape hatch
+	 * rather than being composed from `environment` + `project-slug`. When it
+	 * did, `environment` no longer describes what the caller is waiting for, so
+	 * the environment check against the Vercel API target is skipped.
+	 */
+	environmentNameOverridden: boolean;
 	statusContext: string;
 	requireDeploymentId: boolean;
 	timeout: number;
@@ -62,8 +71,12 @@ export function resolveConfig(): Config {
 	if (!githubToken) {
 		throw new Error('github-token input or GITHUB_TOKEN env var is required');
 	}
-	const vercelToken = core.getInput('vercel-token');
-	const vercelTeamId = core.getInput('vercel-team-id');
+	// Both fall back to the conventional env var names, mirroring
+	// `github-token` / `GITHUB_TOKEN` above.
+	const vercelToken =
+		core.getInput('vercel-token') || process.env.VERCEL_TOKEN || '';
+	const vercelTeamId =
+		core.getInput('vercel-team-id') || process.env.VERCEL_TEAM_ID || '';
 
 	const { owner, repo } = getRepo();
 	const sha = core.getInput('sha').trim() || resolveTargetSha();
@@ -72,7 +85,9 @@ export function resolveConfig(): Config {
 		owner,
 		repo,
 		sha,
+		environment,
 		environmentName,
+		environmentNameOverridden: Boolean(envNameOverride),
 		statusContext,
 		requireDeploymentId,
 		timeout,
@@ -89,6 +104,24 @@ export function composeEnvironmentName(
 ): string {
 	const base = environment === 'production' ? 'Production' : 'Preview';
 	return projectSlug ? `${base} – ${projectSlug}` : base;
+}
+
+/**
+ * The same environment name with `Production` and `Preview` swapped —
+ * `"Production – my-app"` becomes `"Preview – my-app"`. Used to check whether
+ * the commit was *also* deployed to the other environment of the same project,
+ * which is the precondition for the commit status being ambiguous.
+ *
+ * Returns `null` for names that don't follow Vercel's convention (a
+ * hand-written `environment-name`), where no counterpart can be derived.
+ */
+export function counterpartEnvironmentName(
+	environmentName: string,
+): string | null {
+	const match = environmentName.match(/^(Production|Preview)(?=$|\s)/);
+	if (!match?.[1]) return null;
+	const base = match[1] === 'Production' ? 'Preview' : 'Production';
+	return `${base}${environmentName.slice(match[1].length)}`;
 }
 
 export function composeStatusContext(projectSlug: string): string {
