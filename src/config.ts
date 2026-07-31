@@ -6,7 +6,6 @@ export interface Config {
 	repo: string;
 	sha: string;
 	environmentName: string;
-	statusContext: string;
 	requireDeploymentId: boolean;
 	timeout: number;
 	checkInterval: number;
@@ -18,11 +17,10 @@ export interface Config {
  * Throws on missing required values.
  *
  * The auto-composition rules below mirror Vercel's GitHub integration:
- * - Single project on a repo → bare `Preview` / `Vercel`.
- * - Multiple projects on a repo → suffixed `Preview – <slug>` / `Vercel – <slug>`.
+ * - Single project on a repo → bare `Preview` / `Production`.
+ * - Multiple projects on a repo → suffixed environment name.
  *
- * Either side of the heuristic can be overridden with the explicit
- * `environment-name` / `status-context` inputs.
+ * The heuristic can be overridden with the explicit `environment-name` input.
  */
 export function resolveConfig(): Config {
 	const projectSlug = core.getInput('project-slug').trim();
@@ -34,18 +32,9 @@ export function resolveConfig(): Config {
 	}
 
 	const envNameOverride = core.getInput('environment-name').trim();
-	const statusContextOverride = core.getInput('status-context').trim();
 
 	const environmentName =
 		envNameOverride || composeEnvironmentName(environment, projectSlug);
-
-	// `status-context` follows the same empty-string-means-auto convention
-	// as `environment-name`: empty (the action.yml default) → compose from
-	// project-slug; non-empty → use the override as-is. Consumers that don't
-	// want deployment-id resolution at all should set `require-deployment-id:
-	// false` and not read the `deployment-id` output.
-	const statusContext =
-		statusContextOverride || composeStatusContext(projectSlug);
 
 	const requireDeploymentId = parseBool(
 		core.getInput('require-deployment-id'),
@@ -69,7 +58,6 @@ export function resolveConfig(): Config {
 		repo,
 		sha,
 		environmentName,
-		statusContext,
 		requireDeploymentId,
 		timeout,
 		checkInterval,
@@ -83,10 +71,6 @@ export function composeEnvironmentName(
 ): string {
 	const base = environment === 'production' ? 'Production' : 'Preview';
 	return projectSlug ? `${base} – ${projectSlug}` : base;
-}
-
-export function composeStatusContext(projectSlug: string): string {
-	return projectSlug ? `Vercel – ${projectSlug}` : 'Vercel';
 }
 
 function parseBool(raw: string, fallback: boolean): boolean {

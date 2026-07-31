@@ -10,13 +10,11 @@ inputs:
     description: |
       Optional. Set this when the same repository serves multiple Vercel
       projects (e.g. monorepos). Vercel suffixes the GitHub Deployment
-      environment and commit-status context with the project slug in
-      that case ("Preview – my-project" / "Vercel – my-project"); pass
-      the slug here to disambiguate.
+      environment with the project slug in that case
+      ("Preview – my-project"); pass the slug here to disambiguate.
 
       Omit for the common single-project case where Vercel uses the bare
-      "Preview" / "Production" environment names and the bare "Vercel"
-      commit-status context.
+      "Preview" / "Production" environment names.
     required: false
     default: ''
   environment:
@@ -39,21 +37,15 @@ inputs:
     default: ''
   status-context:
     description: |
-      Optional advanced escape hatch. Match the commit-status context
-      that the deployment ID is read from (e.g. "Vercel" or
-      "Vercel – my-project"). When set, this takes precedence over the
-      auto-composed value.
-
-      To skip deployment-id resolution entirely, set
-      `require-deployment-id: false` and ignore the `deployment-id`
-      output.
+      Deprecated and ignored. Kept as an accepted input so existing
+      callers do not receive an unexpected-input warning.
     required: false
     default: ''
   require-deployment-id:
     description: |
       Whether to fail when the Vercel deployment ID cannot be resolved
-      from the deployment or commit status. Defaults to "true". Set to
-      "false" if you only need `deployment-url` and don't care about
+      from the deployment status. Defaults to "true". Set to "false"
+      if you only need `deployment-url` and don't care about
       `deployment-id`.
     required: false
     default: 'true'
@@ -74,18 +66,17 @@ inputs:
     default: ''
   github-token:
     description: |
-      GitHub token used to query the Deployments / Statuses APIs.
+      GitHub token used to query the Deployments API.
       Defaults to the job's automatic GITHUB_TOKEN. The workflow's
-      `permissions:` block must include `deployments: read` (always)
-      and `statuses: read` (for the commit-status compatibility fallback).
+      `permissions:` block must include `deployments: read`.
     required: false
     default: ${{ github.token }}
 
 outputs:
   deployment-url:
-    description: 'URL of the ready Vercel deployment (the GitHub Deployment status `environment_url`, falling back to legacy app-valued `target_url` payloads).'
+    description: 'URL of the ready Vercel deployment (the GitHub Deployment status `environment_url`).'
   deployment-id:
-    description: 'Vercel deployment ID resolved from the same deployment status, with a commit-status compatibility fallback (e.g. `dpl_8z4XjwrRQGYwcDKFMLN5BeTvGhXu`). Empty if resolution failed and `require-deployment-id` is "false".'
+    description: 'Vercel deployment ID resolved from the same deployment status `target_url` (e.g. `dpl_8z4XjwrRQGYwcDKFMLN5BeTvGhXu`). Empty if resolution failed and `require-deployment-id` is "false".'
   deployment-state:
     description: 'The terminal GitHub Deployment status state ("success" or "inactive").'
 

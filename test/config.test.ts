@@ -1,9 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-	composeEnvironmentName,
-	composeStatusContext,
-	resolveConfig,
-} from '../src/config.ts';
+import { composeEnvironmentName, resolveConfig } from '../src/config.ts';
 
 const originalEnv = { ...process.env };
 
@@ -32,16 +28,6 @@ describe('composeEnvironmentName', () => {
 	});
 });
 
-describe('composeStatusContext', () => {
-	it('returns the bare context when no slug is provided', () => {
-		expect(composeStatusContext('')).toBe('Vercel');
-	});
-
-	it('suffixes the slug when provided', () => {
-		expect(composeStatusContext('my-app')).toBe('Vercel – my-app');
-	});
-});
-
 describe('resolveConfig', () => {
 	beforeEach(() => {
 		// Wipe all INPUT_* and GH-managed env vars to a known baseline.
@@ -62,7 +48,6 @@ describe('resolveConfig', () => {
 	it('defaults to bare Preview / Vercel for single-project repos', () => {
 		const cfg = resolveConfig();
 		expect(cfg.environmentName).toBe('Preview');
-		expect(cfg.statusContext).toBe('Vercel');
 		expect(cfg.requireDeploymentId).toBe(true);
 		expect(cfg.timeout).toBe(600);
 		expect(cfg.checkInterval).toBe(10);
@@ -75,7 +60,6 @@ describe('resolveConfig', () => {
 		setInputs({ 'project-slug': 'my-app' });
 		const cfg = resolveConfig();
 		expect(cfg.environmentName).toBe('Preview – my-app');
-		expect(cfg.statusContext).toBe('Vercel – my-app');
 	});
 
 	it('respects environment-name override', () => {
@@ -85,33 +69,14 @@ describe('resolveConfig', () => {
 		});
 		const cfg = resolveConfig();
 		expect(cfg.environmentName).toBe('My Custom Env');
-		// status-context still auto-composes from project-slug
-		expect(cfg.statusContext).toBe('Vercel – my-app');
 	});
 
-	it('respects status-context override', () => {
-		setInputs({ 'status-context': 'My Status' });
-		const cfg = resolveConfig();
-		expect(cfg.statusContext).toBe('My Status');
-	});
-
-	it('treats explicit empty status-context as auto (matches action.yml default)', () => {
-		// GitHub Actions always injects INPUT_STATUS-CONTEXT='' for inputs
-		// that the consumer didn't pass (the empty `default: ''` in
-		// action.yml). The action treats that the same as "not provided"
-		// and auto-composes from `project-slug`.
-		setInputs({ 'status-context': '', 'project-slug': 'my-app' });
-		const cfg = resolveConfig();
-		expect(cfg.statusContext).toBe('Vercel – my-app');
-	});
-
-	it('auto-composes status-context when project-slug is set and override is empty', () => {
+	it('auto-composes environment name when its override is empty', () => {
 		// Mirrors what every consumer hits at runtime: they only pass
-		// project-slug; the runner injects empty strings for the
-		// environment-name / status-context overrides.
+		// project-slug; the runner injects an empty string for the
+		// environment-name override.
 		setInputs({ 'project-slug': 'example-workflow' });
 		const cfg = resolveConfig();
-		expect(cfg.statusContext).toBe('Vercel – example-workflow');
 		expect(cfg.environmentName).toBe('Preview – example-workflow');
 	});
 

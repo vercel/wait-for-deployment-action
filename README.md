@@ -8,7 +8,7 @@ Instead of polling the Vercel API (which needs a Vercel access token), it polls 
 
 - **No Vercel token to manage.** Auths with `GITHUB_TOKEN`. Rotates with your repo.
 - **Robust against Vercel skipped builds.** Vercel emits an `inactive` GitHub Deployment status when it skips a build with "Skipped – Not affected"; the action treats that as ready and surfaces the still-live preview URL.
-- **Resolves the `dpl_xxx` deployment ID** by parsing the `Vercel` commit status' `target_url`, so downstream steps that need the Vercel deployment ID (e.g. to drive `world-vercel`) work out of the box.
+- **Keeps deployment URL and ID paired** by reading `environment_url` and the dashboard `target_url` from the same GitHub Deployment status.
 
 ## Usage
 
@@ -20,7 +20,6 @@ For a repo with exactly one Vercel project connected, just declare the action �
 permissions:
   contents: read
   deployments: read
-  statuses: read
 
 steps:
   - name: Wait for Vercel preview
@@ -37,12 +36,12 @@ steps:
 
 ### Monorepo / multi-project repo
 
-When the same repo serves more than one Vercel project, Vercel suffixes the GitHub Deployment environment and commit status context with the project slug. Pass `project-slug` to disambiguate:
+When the same repo serves more than one Vercel project, Vercel suffixes the GitHub Deployment environment with the project slug. Pass `project-slug` to disambiguate:
 
 ```yaml
 - uses: vercel/wait-for-deployment-action@<commit-sha>
   with:
-    project-slug: my-tarballs       # → "Preview – my-tarballs" / "Vercel – my-tarballs"
+    project-slug: my-tarballs       # → "Preview – my-tarballs"
     environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
 ```
 
@@ -53,8 +52,7 @@ The workflow's `permissions:` block must include:
 ```yaml
 permissions:
   contents: read
-  deployments: read   # always required
-  statuses: read      # required for the commit-status compatibility fallback
+  deployments: read
 ```
 
 If you supply a token via `github-token`, those scopes apply to whatever auth the token represents instead.
@@ -63,10 +61,10 @@ If you supply a token via `github-token`, those scopes apply to whatever auth th
 
 | Name | Required | Default | Description |
 |------|----------|---------|-------------|
-| `project-slug` | no | _empty_ | Set when the repo serves multiple Vercel projects. Suffixes the auto-composed environment name and status context with `– <slug>`. |
+| `project-slug` | no | _empty_ | Set when the repo serves multiple Vercel projects. Suffixes the auto-composed environment name with `– <slug>`. |
 | `environment` | no | `preview` | `production` or `preview`. Ignored when `environment-name` is set. |
 | `environment-name` | no | auto | **Advanced.** Match the GitHub Deployment environment name exactly. Overrides auto-compose. |
-| `status-context` | no | auto | **Advanced.** Match the commit status context exactly. Set to the empty string to skip deployment-id resolution. |
+| `status-context` | no | _empty_ | Deprecated and ignored; retained so existing callers do not receive a warning. |
 | `require-deployment-id` | no | `true` | Fail if the deployment-id cannot be resolved. |
 | `timeout` | no | `600` | Max wait time in seconds. |
 | `check-interval` | no | `10` | Polling interval in seconds. |
@@ -77,16 +75,14 @@ If you supply a token via `github-token`, those scopes apply to whatever auth th
 
 The defaults follow Vercel's GitHub integration's naming.
 
-| Input | `project-slug` set | `project-slug` empty |
-|-------|--------------------|----------------------|
-| `environment-name` | `Preview – <slug>` / `Production – <slug>` | `Preview` / `Production` |
-| `status-context` | `Vercel – <slug>` | `Vercel` |
+`environment-name` defaults to `Preview – <slug>` / `Production – <slug>`
+when `project-slug` is set, and `Preview` / `Production` otherwise.
 
 ## Outputs
 
 | Name | Description |
 |------|-------------|
-| `deployment-url` | URL of the ready deployment (`environment_url`, falling back to `target_url`). |
+| `deployment-url` | URL of the ready deployment (`environment_url`). |
 | `deployment-id` | Vercel deployment ID (e.g. `dpl_8z4XjwrRQGYwcDKFMLN5BeTvGhXu`). Empty when resolution failed and `require-deployment-id` is `false`. |
 | `deployment-state` | Terminal GitHub Deployment status state (`success` or `inactive`). |
 
@@ -96,7 +92,7 @@ The defaults follow Vercel's GitHub integration's naming.
 
 1. Polls `GET /repos/{owner}/{repo}/deployments?sha=<sha>&environment=<env-name>` until a GitHub Deployment created by Vercel exists for the head commit.
 2. Polls `GET /repos/{owner}/{repo}/deployments/{id}/statuses` until the latest status is terminal (`success`, `inactive`, `error`, or `failure`).
-3. On success, extracts the deployment ID from that same deployment status's Vercel dashboard `target_url`. For older status payloads, it falls back to the matching GitHub commit status.
+3. On success, extracts the deployment URL from `environment_url` and its ID from the same status's Vercel dashboard `target_url`.
 
 ## Pinning
 

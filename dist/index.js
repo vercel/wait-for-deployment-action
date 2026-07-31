@@ -62,9 +62,7 @@ function resolveConfig() {
     );
   }
   const envNameOverride = getInput("environment-name").trim();
-  const statusContextOverride = getInput("status-context").trim();
   const environmentName = envNameOverride || composeEnvironmentName(environment, projectSlug);
-  const statusContext = statusContextOverride || composeStatusContext(projectSlug);
   const requireDeploymentId = parseBool(
     getInput("require-deployment-id"),
     true
@@ -82,7 +80,6 @@ function resolveConfig() {
     repo,
     sha,
     environmentName,
-    statusContext,
     requireDeploymentId,
     timeout,
     checkInterval,
@@ -92,9 +89,6 @@ function resolveConfig() {
 function composeEnvironmentName(environment, projectSlug) {
   const base = environment === "production" ? "Production" : "Preview";
   return projectSlug ? `${base} \u2013 ${projectSlug}` : base;
-}
-function composeStatusContext(projectSlug) {
-  return projectSlug ? `Vercel \u2013 ${projectSlug}` : "Vercel";
 }
 function parseBool(raw, fallback) {
   const v = raw.trim().toLowerCase();
@@ -164,11 +158,6 @@ var GitHubClient = class {
     const url = `${API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/deployments/${deploymentId}/statuses?per_page=${perPage}`;
     return await this.#json(url);
   }
-  async getCombinedStatus(params) {
-    const { owner, repo, ref, perPage = 100 } = params;
-    const url = `${API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(ref)}/status?per_page=${perPage}`;
-    return await this.#json(url);
-  }
   async #json(url) {
     const res = await this.#fetch(url, {
       headers: {
@@ -207,15 +196,6 @@ function deploymentIdFromTargetUrl(targetUrl) {
   }
   return `${VERCEL_DEPLOYMENT_ID_PREFIX}${inspectorId}`;
 }
-async function resolveDeploymentId(client, params) {
-  const status = await client.getCombinedStatus({
-    owner: params.owner,
-    repo: params.repo,
-    ref: params.sha
-  });
-  const match = status.statuses.find((s) => s.context === params.context);
-  return deploymentIdFromTargetUrl(match?.target_url);
-}
 
 // src/run.ts
 var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -232,13 +212,7 @@ async function run(deps = {}) {
     info(
       `Looking for GitHub deployment in environment "${config.environmentName}"`
     );
-    if (config.statusContext) {
-      info(
-        `Will resolve deployment ID from the GitHub deployment status, falling back to the "${config.statusContext}" commit status`
-      );
-    } else {
-      info("Deployment ID resolution disabled (status-context is empty)");
-    }
+    info("Will resolve deployment ID from the GitHub deployment status");
     info(
       `Timeout: ${config.timeout}s, Check interval: ${config.checkInterval}s`
     );
@@ -301,7 +275,7 @@ async function run(deps = {}) {
         continue;
       }
       const statusDeploymentId = deploymentIdFromTargetUrl(latest.target_url);
-      const deploymentUrl = latest.environment_url || (statusDeploymentId ? void 0 : latest.target_url);
+      const deploymentUrl = latest.environment_url;
       if (!deploymentUrl) {
         warning(
           `Deployment status was "${latest.state}" but had no environment_url; retrying`
@@ -309,32 +283,16 @@ async function run(deps = {}) {
         await wait(config.checkInterval * 1e3);
         continue;
       }
-      let deploymentId = statusDeploymentId ?? "";
-      if (!deploymentId && config.statusContext) {
-        try {
-          const resolved = await resolveDeploymentId(client, {
-            owner: config.owner,
-            repo: config.repo,
-            sha: config.sha,
-            context: config.statusContext
-          });
-          if (resolved) {
-            deploymentId = resolved;
-          } else if (config.requireDeploymentId) {
-            throw new Error(
-              `Deployment became ready at ${deploymentUrl}, but the deployment ID could not be resolved from its deployment status or the "${config.statusContext}" commit status`
-            );
-          } else {
-            warning(
-              `No "${config.statusContext}" commit status with a target_url found; deployment-id will be empty.`
-            );
-          }
-        } catch (err) {
-          if (config.requireDeploymentId) throw err;
-          warning(
-            `Failed to resolve deployment ID: ${err.message}`
-          );
-        }
+      const deploymentId = statusDeploymentId ?? "";
+      if (!deploymentId && config.requireDeploymentId) {
+        throw new Error(
+          `Deployment became ready at ${deploymentUrl}, but its status target_url did not identify a Vercel dashboard deployment`
+        );
+      }
+      if (!deploymentId) {
+        warning(
+          "Deployment status target_url did not identify a Vercel dashboard deployment; deployment-id will be empty."
+        );
       }
       info(`Deployment ready: ${deploymentUrl}`);
       if (deploymentId) info(`Deployment ID: ${deploymentId}`);
