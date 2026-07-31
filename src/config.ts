@@ -72,12 +72,17 @@ export function resolveConfig(): Config {
 	if (!githubToken) {
 		throw new Error('github-token input or GITHUB_TOKEN env var is required');
 	}
-	// Both fall back to the conventional env var names, mirroring
-	// `github-token` / `GITHUB_TOKEN` above.
-	const vercelToken =
-		core.getInput('vercel-token') || process.env.VERCEL_TOKEN || '';
-	const vercelTeamId =
-		core.getInput('vercel-team-id') || process.env.VERCEL_TEAM_ID || '';
+	// Read from the inputs only — deliberately *not* from ambient `VERCEL_TOKEN`
+	// / `VERCEL_TEAM_ID` env vars, unlike `github-token` above. A token switches
+	// deployment-id resolution from the commit status to the Vercel API, and
+	// that switch should be a visible choice at the call site: `VERCEL_TOKEN` is
+	// a common job-level env var in Vercel-adjacent CI, so falling back to it
+	// would flip resolution modes (and, for a team-owned project with no
+	// `vercel-team-id`, turn a green job into a 404 failure) on workflows that
+	// never asked for it. `github-token` is different: it's required, means one
+	// thing, and changes no behavior.
+	const vercelToken = core.getInput('vercel-token');
+	const vercelTeamId = core.getInput('vercel-team-id');
 
 	const { owner, repo } = getRepo();
 	const sha = core.getInput('sha').trim() || resolveTargetSha();

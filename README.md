@@ -2,14 +2,14 @@
 
 GitHub Action that waits for a [Vercel](https://vercel.com) deployment to be ready in CI, then exposes its URL and deployment ID as step outputs.
 
-It waits by polling GitHub's [Deployments API](https://docs.github.com/en/rest/deployments/deployments), which Vercel's GitHub integration writes to — so waiting needs no Vercel credentials, just the default `GITHUB_TOKEN`. Pass `vercel-token` as well if you use the `deployment-id` output; see [Resolving the deployment ID](#resolving-the-deployment-id).
+It works entirely off GitHub's [Deployments API](https://docs.github.com/en/rest/deployments/deployments) and commit statuses, which Vercel's GitHub integration writes to — so it needs no Vercel credentials, just the default `GITHUB_TOKEN`.
 
 ## Why
 
-- **Waits without a Vercel token.** Auths with `GITHUB_TOKEN`. Rotates with your repo.
+- **No Vercel token required.** Both outputs, URL and deployment ID, come from GitHub. Auths with `GITHUB_TOKEN`, rotates with your repo.
 - **Robust against Vercel skipped builds.** Vercel emits an `inactive` GitHub Deployment status when it skips a build with "Skipped – Not affected"; the action treats that as ready and surfaces the still-live preview URL.
 - **Resolves the `dpl_xxx` deployment ID**, so downstream steps that need the Vercel deployment ID (e.g. to drive `world-vercel`) work out of the box.
-- **Never mixes environments.** With `vercel-token`, `deployment-id` and `deployment-url` always describe the same deployment, and the action fails if that deployment isn't in the `environment` you asked for.
+- **Says so when that ID could name the wrong environment.** GitHub only carries the ID on a per-project commit status, so it's ambiguous when one commit is deployed to two environments of the project — the action checks for exactly that and warns. See [Resolving the deployment ID](#resolving-the-deployment-id).
 
 ## Usage
 
@@ -60,9 +60,25 @@ The commit status is overwritten by whichever deployment of that commit finishes
 
 > A release branch is force-pushed to `main`'s HEAD. Vercel builds that one commit twice — production from `main`, and a preview from the branch. The preview finishes last, so the commit status names the preview. A job waiting on `environment: production` gets the **production URL** paired with the **preview ID**, and every downstream step keyed on that ID silently addresses the wrong environment.
 
-### Recommended: pass `vercel-token`
+### Default: the commit status, with an ambiguity check
 
-With a token the ID is resolved by looking the deployment **URL** up against the Vercel API, so the ID and the URL cannot disagree — and the deployment's environment is checked against `environment`, failing the job if they don't match.
+No token, no configuration. The ID comes from the commit status, and since that status is only ambiguous when the commit went to more than one environment, the action checks whether it did — one extra call against the `deployments: read` scope it already needs:
+
+| What the check finds | What you get |
+|---|---|
+| The commit was deployed to this environment only | The ID, and a log line naming the status it read |
+| The commit was **also** deployed to the project's other environment | The ID, plus a **warning** that it may name the other environment's deployment |
+| The check can't run or errors | The ID, plus that same warning — an unruled-out hazard shouldn't be quieter than a confirmed one |
+
+A hand-written `environment-name` is the "can't run" case: there's no derivable counterpart environment to compare against.
+
+The durable fix for a warning is upstream, not here — stop deploying one commit to two environments of the same project. It usually means two branches point at the same SHA (a release branch force-pushed to `main`'s HEAD, say), and excluding one of them from deployment removes the ambiguity at the source.
+
+If you only need `deployment-url`, set `require-deployment-id: false` and ignore `deployment-id`. That downgrades a failed resolution to a warning rather than skipping the lookup, so the ID is still emitted when it can be determined.
+
+### Escape hatch: `vercel-token`
+
+Only worth reaching for if you already hold a Vercel access token for other reasons — needing one is what this action is designed to avoid, and the check above is enough for most consumers. With a token the ID is resolved by looking the deployment **URL** up against the Vercel API, so the ID and the URL cannot disagree, and the deployment's environment is checked against `environment`, failing the job if they don't match.
 
 ```yaml
 - uses: vercel/wait-for-deployment-action@<commit-sha>
@@ -76,11 +92,11 @@ With a token the ID is resolved by looking the deployment **URL** up against the
 
 `vercel-team-id` is not optional for a project owned by a Vercel team: the API answers `404` (not `403`) for a team's deployments when the request isn't scoped to that team. A read-only token is enough.
 
-### Without a token
+The token is read from the input only. Neither credential falls back to a `VERCEL_TOKEN` / `VERCEL_TEAM_ID` environment variable, so an ambient token in your job env can't quietly switch resolution modes — pass `vercel-token: ${{ env.VERCEL_TOKEN }}` if that's what you want.
 
-The commit-status fallback is unchanged, so existing workflows keep working. Since the status is only ambiguous when the commit went to more than one environment, the action checks whether it did: if so it warns that `deployment-id` may name the other environment's deployment, and otherwise it just notes which status it read. A hand-written `environment-name` has no derivable counterpart environment, so the check can't run and the warning is unconditional.
+### Backward compatibility
 
-If you only need `deployment-url`, set `require-deployment-id: false` and ignore `deployment-id`. That downgrades a failed resolution to a warning rather than skipping the lookup, so the ID is still emitted when it can be determined.
+Nothing changes for existing workflows. Passing no `vercel-token` keeps the commit-status path and the same `deployment-id`, including in the ambiguous case — the action reports the hazard, it doesn't refuse it. The only new output on that path is the log line or warning from the check, and it needs no permission you weren't already granting.
 
 ## Permissions
 
@@ -108,8 +124,8 @@ If you supply a token via `github-token`, those scopes apply to whatever auth th
 | `check-interval` | no | `10` | Polling interval in seconds. |
 | `sha` | no | auto | Commit SHA to look up. Defaults to PR head SHA / push SHA / `GITHUB_SHA`. |
 | `github-token` | no | `${{ github.token }}` | Token used for the GitHub API calls. |
-| `vercel-token` | no | `$VERCEL_TOKEN` | **Recommended.** Vercel access token. Resolves `deployment-id` from `deployment-url` and verifies the deployment's environment. See [Resolving the deployment ID](#resolving-the-deployment-id). |
-| `vercel-team-id` | no | `$VERCEL_TEAM_ID` | Vercel team (`team_...`) that owns the project. Required alongside `vercel-token` for team-owned projects. |
+| `vercel-token` | no | _empty_ | **Escape hatch; most consumers don't need it.** Vercel access token. Resolves `deployment-id` from `deployment-url` and verifies the deployment's environment. See [Resolving the deployment ID](#resolving-the-deployment-id). |
+| `vercel-team-id` | no | _empty_ | Vercel team (`team_...`) that owns the project. Only used alongside `vercel-token`, where it is required for team-owned projects. |
 
 ### Auto-composition rules
 

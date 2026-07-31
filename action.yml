@@ -103,31 +103,38 @@ inputs:
     default: ${{ github.token }}
   vercel-token:
     description: |
-      Optional Vercel access token. Strongly recommended.
+      Optional escape hatch. Most consumers should not need this, and
+      this action is deliberately designed not to require a Vercel
+      access token — leave it unset unless you already hold one for
+      other reasons.
 
-      When set, the deployment ID is resolved by looking up the
-      deployment URL against the Vercel API, so `deployment-id` and
+      By default the deployment ID is parsed out of the
+      "Vercel – <project>" commit status, which Vercel maintains per
+      project rather than per environment. That is unambiguous as long
+      as a commit is deployed to one environment of the project; when
+      the same commit is deployed to several, the ID can belong to a
+      different deployment than `deployment-url`, and the action checks
+      for that case and warns.
+
+      When this token is set, the ID is instead resolved by looking up
+      the deployment URL against the Vercel API, so `deployment-id` and
       `deployment-url` are guaranteed to describe the same deployment,
       and the deployment's environment is verified against
       `environment`.
 
-      Without it, the ID is parsed out of the "Vercel – <project>"
-      commit status, which Vercel maintains per project rather than per
-      environment: when one commit is deployed to several environments,
-      the ID can belong to a different deployment than
-      `deployment-url`.
-
-      Falls back to the `VERCEL_TOKEN` environment variable.
+      Read-only scope is enough. Not read from the `VERCEL_TOKEN`
+      environment variable: switching resolution modes should be a
+      visible choice at the call site.
     required: false
     default: ''
   vercel-team-id:
     description: |
-      Vercel team ID (`team_...`) that owns the project. Required
-      alongside `vercel-token` for team-owned projects: the Vercel API
-      answers 404 for a team's deployments when the request isn't scoped
-      to that team.
+      Vercel team ID (`team_...`) that owns the project. Only used
+      alongside `vercel-token`, where it is required for team-owned
+      projects: the Vercel API answers 404 for a team's deployments
+      when the request isn't scoped to that team.
 
-      Falls back to the `VERCEL_TEAM_ID` environment variable.
+      Not read from the `VERCEL_TEAM_ID` environment variable.
     required: false
     default: ''
 

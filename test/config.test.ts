@@ -208,18 +208,27 @@ describe('resolveConfig', () => {
 		expect(cfg.vercelTeamId).toBe('team_abc');
 	});
 
-	it('falls back to VERCEL_TOKEN / VERCEL_TEAM_ID', () => {
+	it('ignores ambient VERCEL_TOKEN / VERCEL_TEAM_ID env vars', () => {
+		// A token switches deployment-id resolution modes; that switch must be
+		// an explicit choice at the call site, not something an ambient
+		// job-level env var flips on a pin bump.
 		process.env.VERCEL_TOKEN = 'vercel_env';
 		process.env.VERCEL_TEAM_ID = 'team_env';
 		const cfg = resolveConfig();
-		expect(cfg.vercelToken).toBe('vercel_env');
-		expect(cfg.vercelTeamId).toBe('team_env');
+		expect(cfg.vercelToken).toBe('');
+		expect(cfg.vercelTeamId).toBe('');
 	});
 
-	it('prefers the inputs over the env vars', () => {
+	it('reads the credentials from inputs even when ambient env vars are set', () => {
 		process.env.VERCEL_TOKEN = 'vercel_env';
-		setInputs({ 'vercel-token': 'vercel_input' });
-		expect(resolveConfig().vercelToken).toBe('vercel_input');
+		process.env.VERCEL_TEAM_ID = 'team_env';
+		setInputs({
+			'vercel-token': 'vercel_input',
+			'vercel-team-id': 'team_input',
+		});
+		const cfg = resolveConfig();
+		expect(cfg.vercelToken).toBe('vercel_input');
+		expect(cfg.vercelTeamId).toBe('team_input');
 	});
 
 	it('leaves the Vercel credentials empty by default', () => {

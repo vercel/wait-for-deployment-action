@@ -75,8 +75,8 @@ function resolveConfig() {
   if (!githubToken) {
     throw new Error("github-token input or GITHUB_TOKEN env var is required");
   }
-  const vercelToken = getInput("vercel-token") || process.env.VERCEL_TOKEN || "";
-  const vercelTeamId = getInput("vercel-team-id") || process.env.VERCEL_TEAM_ID || "";
+  const vercelToken = getInput("vercel-token");
+  const vercelTeamId = getInput("vercel-team-id");
   const { owner, repo } = getRepo();
   const sha = getInput("sha").trim() || resolveTargetSha();
   return {
@@ -464,7 +464,7 @@ async function resolveDeploymentIdFor(client, config, deploymentUrl, vercelFetch
 }
 async function noteCommitStatusAmbiguity(client, config) {
   const shared = `Vercel keeps a single "${config.statusContext}" commit status per project rather than per environment, overwritten by whichever deployment finished last, so the deployment-id read from it can belong to a different deployment than deployment-url.`;
-  const advice = "Pass `vercel-token` (plus `vercel-team-id` for team-owned projects) to resolve the ID from `deployment-url` instead, which cannot disagree.";
+  const advice = "The durable fix is to stop deploying one commit to multiple environments of this project (typically two branches pointing at the same SHA). If you already hold a Vercel access token, `vercel-token` (plus `vercel-team-id` for team-owned projects) resolves the ID from `deployment-url` instead, which cannot disagree.";
   const counterpart = counterpartEnvironmentName(config.environmentName);
   if (!counterpart) {
     warning(`${shared} ${advice}`);
@@ -491,7 +491,7 @@ async function noteCommitStatusAmbiguity(client, config) {
     return;
   }
   info(
-    `Resolving deployment-id from the "${config.statusContext}" commit status. ${config.sha} was not deployed to "${counterpart}", so that status is unambiguous for this commit. ${advice}`
+    `Resolving deployment-id from the "${config.statusContext}" commit status. ${config.sha} was not deployed to "${counterpart}", so that status is unambiguous for this commit.`
   );
 }
 

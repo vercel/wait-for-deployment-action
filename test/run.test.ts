@@ -253,20 +253,22 @@ describe('run', () => {
 			expect(failures[0]).toMatch(/Vercel API 404/);
 			expect(outputs['deployment-id']).toBeUndefined();
 		});
+	});
 
-		it('reads the token from VERCEL_TOKEN / VERCEL_TEAM_ID', async () => {
+	describe('without a vercel-token', () => {
+		it('ignores ambient VERCEL_TOKEN / VERCEL_TEAM_ID and stays on the commit-status path', async () => {
+			// An ambient job-level env var must not switch resolution modes:
+			// only the explicit `vercel-token` input engages the Vercel API.
 			const h = harness();
 			process.env.VERCEL_TOKEN = 'vercel_from_env';
 			process.env.VERCEL_TEAM_ID = 'team_from_env';
 
 			await run({ client: h.client, vercelFetch: h.vercelFetch });
 
-			expect(outputs['deployment-id']).toBe(PRODUCTION_ID);
-			expect(h.vercelCalls[0]).toContain('teamId=team_from_env');
+			expect(h.vercelCalls).toHaveLength(0);
+			expect(outputs['deployment-id']).toBe(PREVIEW_ID);
 		});
-	});
 
-	describe('without a vercel-token', () => {
 		it('still resolves from the commit status, and warns loudly when the SHA spans environments', async () => {
 			const h = harness();
 
@@ -278,7 +280,9 @@ describe('run', () => {
 			expect(warnings.join('\n')).toMatch(
 				/was deployed to both "Production – my-app" and "Preview – my-app"/,
 			);
-			expect(warnings.join('\n')).toMatch(/Pass `vercel-token`/);
+			expect(warnings.join('\n')).toMatch(
+				/durable fix is to stop deploying one commit to multiple environments/,
+			);
 		});
 
 		it('does not warn at all when the SHA is in one environment only', async () => {

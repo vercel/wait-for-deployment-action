@@ -277,7 +277,7 @@ async function noteCommitStatusAmbiguity(
 ): Promise<void> {
 	const shared = `Vercel keeps a single "${config.statusContext}" commit status per project rather than per environment, overwritten by whichever deployment finished last, so the deployment-id read from it can belong to a different deployment than deployment-url.`;
 	const advice =
-		'Pass `vercel-token` (plus `vercel-team-id` for team-owned projects) to resolve the ID from `deployment-url` instead, which cannot disagree.';
+		'The durable fix is to stop deploying one commit to multiple environments of this project (typically two branches pointing at the same SHA). If you already hold a Vercel access token, `vercel-token` (plus `vercel-team-id` for team-owned projects) resolves the ID from `deployment-url` instead, which cannot disagree.';
 
 	const counterpart = counterpartEnvironmentName(config.environmentName);
 	// A hand-written `environment-name` has no derivable counterpart, so
@@ -310,6 +310,6 @@ async function noteCommitStatusAmbiguity(
 	}
 
 	core.info(
-		`Resolving deployment-id from the "${config.statusContext}" commit status. ${config.sha} was not deployed to "${counterpart}", so that status is unambiguous for this commit. ${advice}`,
+		`Resolving deployment-id from the "${config.statusContext}" commit status. ${config.sha} was not deployed to "${counterpart}", so that status is unambiguous for this commit.`,
 	);
 }
