@@ -104,6 +104,38 @@ export class GitHubClient {
 }
 
 const VERCEL_DEPLOYMENT_ID_PREFIX = 'dpl_';
+const VERCEL_DASHBOARD_HOST = 'vercel.com';
+const VERCEL_INSPECTOR_ID = /^[A-Za-z0-9]+$/;
+
+/**
+ * Extract the deployment ID from a Vercel dashboard deployment URL.
+ *
+ * Deployment statuses are scoped to one GitHub Deployment, so an ID carried
+ * by that status is guaranteed to describe the same deployment as its
+ * `environment_url`.
+ */
+export function deploymentIdFromTargetUrl(
+	targetUrl: string | null | undefined,
+): string | null {
+	if (!targetUrl) return null;
+	let url: URL;
+	try {
+		url = new URL(targetUrl);
+	} catch {
+		return null;
+	}
+	if (url.hostname !== VERCEL_DASHBOARD_HOST) return null;
+	const segments = url.pathname.split('/').filter(Boolean);
+	const inspectorId = segments.at(-1);
+	if (
+		segments.length < 3 ||
+		!inspectorId ||
+		!VERCEL_INSPECTOR_ID.test(inspectorId)
+	) {
+		return null;
+	}
+	return `${VERCEL_DEPLOYMENT_ID_PREFIX}${inspectorId}`;
+}
 
 /**
  * Look up the Vercel deployment ID from the commit's combined status.
@@ -126,15 +158,5 @@ export async function resolveDeploymentId(
 		ref: params.sha,
 	});
 	const match = status.statuses.find((s) => s.context === params.context);
-	if (!match?.target_url) return null;
-	let pathname: string;
-	try {
-		pathname = new URL(match.target_url).pathname;
-	} catch {
-		return null;
-	}
-	const segments = pathname.split('/').filter(Boolean);
-	const inspectorId = segments.at(-1);
-	if (!inspectorId) return null;
-	return `${VERCEL_DEPLOYMENT_ID_PREFIX}${inspectorId}`;
+	return deploymentIdFromTargetUrl(match?.target_url);
 }

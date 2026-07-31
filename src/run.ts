@@ -1,19 +1,12 @@
 import { resolveConfig } from './config.ts';
 import * as core from './core.ts';
 import {
+	deploymentIdFromTargetUrl,
 	GitHubClient,
 	type GitHubDeployment,
 	type GitHubDeploymentStatus,
 	resolveDeploymentId,
 } from './github.ts';
-import {
-	resolveDeploymentIdFromUrl,
-	type VercelDeploymentIdSource,
-} from './vercel.ts';
-
-type DeploymentIdSource =
-	| VercelDeploymentIdSource
-	| { type: 'github'; context: string };
 
 const sleep = (ms: number) =>
 	new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -48,7 +41,9 @@ export async function run(deps: RunDeps = {}): Promise<void> {
 			`Looking for GitHub deployment in environment "${config.environmentName}"`,
 		);
 		if (config.statusContext) {
-			core.info('Will resolve deployment ID');
+			core.info(
+				`Will resolve deployment ID from the GitHub deployment status, falling back to the "${config.statusContext}" commit status`,
+			);
 		} else {
 			core.info('Deployment ID resolution disabled (status-context is empty)');
 		}
@@ -131,7 +126,10 @@ export async function run(deps: RunDeps = {}): Promise<void> {
 				continue;
 			}
 
-			const deploymentUrl = latest.environment_url || latest.target_url;
+			const statusDeploymentId = deploymentIdFromTargetUrl(latest.target_url);
+			const deploymentUrl =
+				latest.environment_url ||
+				(statusDeploymentId ? undefined : latest.target_url);
 			if (!deploymentUrl) {
 				core.warning(
 					`Deployment status was "${latest.state}" but had no environment_url; retrying`,
@@ -140,31 +138,23 @@ export async function run(deps: RunDeps = {}): Promise<void> {
 				continue;
 			}
 
-			// 3. Resolve the provider deployment ID.
-			const source: DeploymentIdSource = config.vercelToken
-				? {
-						type: 'vercel',
-						token: config.vercelToken,
-						teamId: config.vercelTeamId || null,
-					}
-				: { type: 'github', context: config.statusContext };
-			let deploymentId = '';
-			if (config.statusContext) {
+			// 3. Resolve the provider deployment ID from this exact deployment
+			// status. Fall back to the commit status for older Vercel payloads
+			// whose target_url duplicated environment_url.
+			let deploymentId = statusDeploymentId ?? '';
+			if (!deploymentId && config.statusContext) {
 				try {
-					const resolved =
-						source.type === 'vercel'
-							? await resolveDeploymentIdFromUrl(deploymentUrl, source)
-							: await resolveDeploymentId(client, {
-									owner: config.owner,
-									repo: config.repo,
-									sha: config.sha,
-									context: source.context,
-								});
+					const resolved = await resolveDeploymentId(client, {
+						owner: config.owner,
+						repo: config.repo,
+						sha: config.sha,
+						context: config.statusContext,
+					});
 					if (resolved) {
 						deploymentId = resolved;
 					} else if (config.requireDeploymentId) {
 						throw new Error(
-							`Deployment became ready at ${deploymentUrl}, but the deployment ID could not be resolved from the "${config.statusContext}" commit status`,
+							`Deployment became ready at ${deploymentUrl}, but the deployment ID could not be resolved from its deployment status or the "${config.statusContext}" commit status`,
 						);
 					} else {
 						core.warning(

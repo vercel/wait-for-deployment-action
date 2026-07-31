@@ -11,8 +11,6 @@ export interface Config {
 	timeout: number;
 	checkInterval: number;
 	githubToken: string;
-	vercelToken: string;
-	vercelTeamId: string;
 }
 
 /**
@@ -62,8 +60,6 @@ export function resolveConfig(): Config {
 	if (!githubToken) {
 		throw new Error('github-token input or GITHUB_TOKEN env var is required');
 	}
-	const vercelToken = core.getInput('vercel-token');
-	const vercelTeamId = core.getInput('vercel-team-id');
 
 	const { owner, repo } = getRepo();
 	const sha = core.getInput('sha').trim() || resolveTargetSha();
@@ -78,8 +74,6 @@ export function resolveConfig(): Config {
 		timeout,
 		checkInterval,
 		githubToken,
-		vercelToken,
-		vercelTeamId,
 	};
 }
 

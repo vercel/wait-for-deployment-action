@@ -2,7 +2,7 @@
 
 GitHub Action that waits for a [Vercel](https://vercel.com) deployment to be ready in CI, then exposes its URL and deployment ID as step outputs.
 
-By default, the action uses GitHub's [Deployments API](https://docs.github.com/en/rest/deployments/deployments) and the default `GITHUB_TOKEN`. Pass `vercel-token` to resolve the deployment ID from the exact environment-specific URL.
+Instead of polling the Vercel API (which needs a Vercel access token), it polls **GitHub's** [Deployments API](https://docs.github.com/en/rest/deployments/deployments) — Vercel's GitHub integration publishes everything we need there. That means no Vercel token to provision, and the action authenticates with the default `GITHUB_TOKEN`.
 
 ## Why
 
@@ -54,7 +54,7 @@ The workflow's `permissions:` block must include:
 permissions:
   contents: read
   deployments: read   # always required
-  statuses: read      # required when resolving deployment-id without vercel-token
+  statuses: read      # required for the commit-status compatibility fallback
 ```
 
 If you supply a token via `github-token`, those scopes apply to whatever auth the token represents instead.
@@ -72,8 +72,6 @@ If you supply a token via `github-token`, those scopes apply to whatever auth th
 | `check-interval` | no | `10` | Polling interval in seconds. |
 | `sha` | no | auto | Commit SHA to look up. Defaults to PR head SHA / push SHA / `GITHUB_SHA`. |
 | `github-token` | no | `${{ github.token }}` | Token used for the GitHub API calls. |
-| `vercel-token` | no | _empty_ | Vercel access token used to resolve the deployment ID from the exact deployment URL. |
-| `vercel-team-id` | no | _empty_ | Vercel team ID used to scope the exact deployment lookup for team-owned projects. |
 
 ### Auto-composition rules
 
@@ -98,7 +96,7 @@ The defaults follow Vercel's GitHub integration's naming.
 
 1. Polls `GET /repos/{owner}/{repo}/deployments?sha=<sha>&environment=<env-name>` until a GitHub Deployment created by Vercel exists for the head commit.
 2. Polls `GET /repos/{owner}/{repo}/deployments/{id}/statuses` until the latest status is terminal (`success`, `inactive`, `error`, or `failure`).
-3. On success, resolves the deployment ID from the exact URL via Vercel when `vercel-token` is set; otherwise it uses the matching GitHub commit status.
+3. On success, extracts the deployment ID from that same deployment status's Vercel dashboard `target_url`. For older status payloads, it falls back to the matching GitHub commit status.
 
 ## Pinning
 

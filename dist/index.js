@@ -75,8 +75,6 @@ function resolveConfig() {
   if (!githubToken) {
     throw new Error("github-token input or GITHUB_TOKEN env var is required");
   }
-  const vercelToken = getInput("vercel-token");
-  const vercelTeamId = getInput("vercel-team-id");
   const { owner, repo } = getRepo();
   const sha = getInput("sha").trim() || resolveTargetSha();
   return {
@@ -88,9 +86,7 @@ function resolveConfig() {
     requireDeploymentId,
     timeout,
     checkInterval,
-    githubToken,
-    vercelToken,
-    vercelTeamId
+    githubToken
   };
 }
 function composeEnvironmentName(environment, projectSlug) {
@@ -193,6 +189,24 @@ ${body}` : ""}`
   }
 };
 var VERCEL_DEPLOYMENT_ID_PREFIX = "dpl_";
+var VERCEL_DASHBOARD_HOST = "vercel.com";
+var VERCEL_INSPECTOR_ID = /^[A-Za-z0-9]+$/;
+function deploymentIdFromTargetUrl(targetUrl) {
+  if (!targetUrl) return null;
+  let url;
+  try {
+    url = new URL(targetUrl);
+  } catch {
+    return null;
+  }
+  if (url.hostname !== VERCEL_DASHBOARD_HOST) return null;
+  const segments = url.pathname.split("/").filter(Boolean);
+  const inspectorId = segments.at(-1);
+  if (segments.length < 3 || !inspectorId || !VERCEL_INSPECTOR_ID.test(inspectorId)) {
+    return null;
+  }
+  return `${VERCEL_DEPLOYMENT_ID_PREFIX}${inspectorId}`;
+}
 async function resolveDeploymentId(client, params) {
   const status = await client.getCombinedStatus({
     owner: params.owner,
@@ -200,38 +214,7 @@ async function resolveDeploymentId(client, params) {
     ref: params.sha
   });
   const match = status.statuses.find((s) => s.context === params.context);
-  if (!match?.target_url) return null;
-  let pathname;
-  try {
-    pathname = new URL(match.target_url).pathname;
-  } catch {
-    return null;
-  }
-  const segments = pathname.split("/").filter(Boolean);
-  const inspectorId = segments.at(-1);
-  if (!inspectorId) return null;
-  return `${VERCEL_DEPLOYMENT_ID_PREFIX}${inspectorId}`;
-}
-
-// src/vercel.ts
-import assert from "node:assert/strict";
-var DEPLOYMENT_ID = /^dpl_[A-Za-z0-9]+$/;
-async function resolveDeploymentIdFromUrl(deploymentUrl, source) {
-  const hostname = new URL(deploymentUrl).hostname;
-  const url = new URL(
-    `https://api.vercel.com/v13/deployments/${encodeURIComponent(hostname)}`
-  );
-  if (source.teamId) url.searchParams.set("teamId", source.teamId);
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${source.token}` }
-  });
-  assert(response.ok, `Vercel API returned ${response.status} for ${hostname}`);
-  const deployment = await response.json();
-  assert(
-    typeof deployment === "object" && deployment !== null && "id" in deployment && typeof deployment.id === "string" && DEPLOYMENT_ID.test(deployment.id),
-    "Vercel API returned an invalid deployment ID"
-  );
-  return deployment.id;
+  return deploymentIdFromTargetUrl(match?.target_url);
 }
 
 // src/run.ts
@@ -250,7 +233,9 @@ async function run(deps = {}) {
       `Looking for GitHub deployment in environment "${config.environmentName}"`
     );
     if (config.statusContext) {
-      info("Will resolve deployment ID");
+      info(
+        `Will resolve deployment ID from the GitHub deployment status, falling back to the "${config.statusContext}" commit status`
+      );
     } else {
       info("Deployment ID resolution disabled (status-context is empty)");
     }
@@ -315,7 +300,8 @@ async function run(deps = {}) {
         await wait(config.checkInterval * 1e3);
         continue;
       }
-      const deploymentUrl = latest.environment_url || latest.target_url;
+      const statusDeploymentId = deploymentIdFromTargetUrl(latest.target_url);
+      const deploymentUrl = latest.environment_url || (statusDeploymentId ? void 0 : latest.target_url);
       if (!deploymentUrl) {
         warning(
           `Deployment status was "${latest.state}" but had no environment_url; retrying`
@@ -323,25 +309,20 @@ async function run(deps = {}) {
         await wait(config.checkInterval * 1e3);
         continue;
       }
-      const source = config.vercelToken ? {
-        type: "vercel",
-        token: config.vercelToken,
-        teamId: config.vercelTeamId || null
-      } : { type: "github", context: config.statusContext };
-      let deploymentId = "";
-      if (config.statusContext) {
+      let deploymentId = statusDeploymentId ?? "";
+      if (!deploymentId && config.statusContext) {
         try {
-          const resolved = source.type === "vercel" ? await resolveDeploymentIdFromUrl(deploymentUrl, source) : await resolveDeploymentId(client, {
+          const resolved = await resolveDeploymentId(client, {
             owner: config.owner,
             repo: config.repo,
             sha: config.sha,
-            context: source.context
+            context: config.statusContext
           });
           if (resolved) {
             deploymentId = resolved;
           } else if (config.requireDeploymentId) {
             throw new Error(
-              `Deployment became ready at ${deploymentUrl}, but the deployment ID could not be resolved from the "${config.statusContext}" commit status`
+              `Deployment became ready at ${deploymentUrl}, but the deployment ID could not be resolved from its deployment status or the "${config.statusContext}" commit status`
             );
           } else {
             warning(

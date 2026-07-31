@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GitHubClient, resolveDeploymentId } from '../src/github.ts';
+import {
+	deploymentIdFromTargetUrl,
+	GitHubClient,
+	resolveDeploymentId,
+} from '../src/github.ts';
 
 function makeFetch(
 	handler: (url: string, init?: RequestInit) => Promise<Response> | Response,
@@ -65,6 +69,26 @@ describe('GitHubClient', () => {
 				environment: 'Preview',
 			}),
 		).rejects.toThrow(/404 Not Found[\s\S]*Not Found/);
+	});
+});
+
+describe('deploymentIdFromTargetUrl', () => {
+	it('extracts the ID from a Vercel dashboard deployment URL', () => {
+		expect(
+			deploymentIdFromTargetUrl(
+				'https://vercel.com/vercel/workflow-server/8z4XjwrRQGYwcDKFMLN5BeTvGhXu',
+			),
+		).toBe('dpl_8z4XjwrRQGYwcDKFMLN5BeTvGhXu');
+	});
+
+	it('rejects deployment app URLs and malformed dashboard URLs', () => {
+		expect(
+			deploymentIdFromTargetUrl('https://workflow-server-abc123.vercel.app'),
+		).toBeNull();
+		expect(
+			deploymentIdFromTargetUrl('https://vercel.com/team/project'),
+		).toBeNull();
+		expect(deploymentIdFromTargetUrl('not a url')).toBeNull();
 	});
 });
 

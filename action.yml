@@ -52,8 +52,9 @@ inputs:
   require-deployment-id:
     description: |
       Whether to fail when the Vercel deployment ID cannot be resolved
-      Defaults to "true". Set to "false" if you only need
-      `deployment-url` and don't care about `deployment-id`.
+      from the deployment or commit status. Defaults to "true". Set to
+      "false" if you only need `deployment-url` and don't care about
+      `deployment-id`.
     required: false
     default: 'true'
   timeout:
@@ -76,23 +77,15 @@ inputs:
       GitHub token used to query the Deployments / Statuses APIs.
       Defaults to the job's automatic GITHUB_TOKEN. The workflow's
       `permissions:` block must include `deployments: read` (always)
-      and `statuses: read` (when resolving deployment ID without vercel-token).
+      and `statuses: read` (for the commit-status compatibility fallback).
     required: false
     default: ${{ github.token }}
-  vercel-token:
-    description: 'Optional Vercel access token used to resolve deployment-id from the exact deployment URL.'
-    required: false
-    default: ''
-  vercel-team-id:
-    description: 'Optional Vercel team ID used to scope the deployment lookup.'
-    required: false
-    default: ''
 
 outputs:
   deployment-url:
-    description: 'URL of the ready Vercel deployment (the GitHub Deployment status `environment_url`, falling back to `target_url`).'
+    description: 'URL of the ready Vercel deployment (the GitHub Deployment status `environment_url`, falling back to legacy app-valued `target_url` payloads).'
   deployment-id:
-    description: 'Vercel deployment ID (e.g. `dpl_8z4XjwrRQGYwcDKFMLN5BeTvGhXu`). Empty if resolution failed and `require-deployment-id` is "false".'
+    description: 'Vercel deployment ID resolved from the same deployment status, with a commit-status compatibility fallback (e.g. `dpl_8z4XjwrRQGYwcDKFMLN5BeTvGhXu`). Empty if resolution failed and `require-deployment-id` is "false".'
   deployment-state:
     description: 'The terminal GitHub Deployment status state ("success" or "inactive").'
 
