@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { GitHubClient, resolveDeploymentId } from '../src/github.ts';
+import { describe, expect, it } from 'vitest';
+import { deploymentIdFromTargetUrl, GitHubClient } from '../src/github.ts';
 
 function makeFetch(
 	handler: (url: string, init?: RequestInit) => Promise<Response> | Response,
@@ -68,103 +68,22 @@ describe('GitHubClient', () => {
 	});
 });
 
-describe('resolveDeploymentId', () => {
-	function clientReturning(combined: unknown) {
-		return new GitHubClient(
-			't',
-			makeFetch(
-				() =>
-					new Response(JSON.stringify(combined), {
-						status: 200,
-						headers: { 'content-type': 'application/json' },
-					}),
+describe('deploymentIdFromTargetUrl', () => {
+	it('extracts the ID from a Vercel dashboard deployment URL', () => {
+		expect(
+			deploymentIdFromTargetUrl(
+				'https://vercel.com/vercel/workflow-server/8z4XjwrRQGYwcDKFMLN5BeTvGhXu',
 			),
-		);
-	}
-
-	it('extracts the inspector ID from the target_url last segment and prepends dpl_', async () => {
-		const client = clientReturning({
-			state: 'success',
-			statuses: [
-				{
-					context: 'Vercel',
-					state: 'success',
-					target_url:
-						'https://vercel.com/vercel/workflow-server/8z4XjwrRQGYwcDKFMLN5BeTvGhXu',
-				},
-			],
-		});
-		const id = await resolveDeploymentId(client, {
-			owner: 'o',
-			repo: 'r',
-			sha: 'x',
-			context: 'Vercel',
-		});
-		expect(id).toBe('dpl_8z4XjwrRQGYwcDKFMLN5BeTvGhXu');
+		).toBe('dpl_8z4XjwrRQGYwcDKFMLN5BeTvGhXu');
 	});
 
-	it('matches on context exactly', async () => {
-		const client = clientReturning({
-			state: 'success',
-			statuses: [
-				{
-					context: 'Vercel – workflow-server',
-					state: 'success',
-					target_url: 'https://vercel.com/team/proj/abc123',
-				},
-				{ context: 'Vercel', state: 'success', target_url: 'wrong' },
-			],
-		});
-		const id = await resolveDeploymentId(client, {
-			owner: 'o',
-			repo: 'r',
-			sha: 'x',
-			context: 'Vercel – workflow-server',
-		});
-		expect(id).toBe('dpl_abc123');
-	});
-
-	it('returns null when no matching context is present', async () => {
-		const client = clientReturning({ state: 'pending', statuses: [] });
-		const id = await resolveDeploymentId(client, {
-			owner: 'o',
-			repo: 'r',
-			sha: 'x',
-			context: 'Vercel',
-		});
-		expect(id).toBeNull();
-	});
-
-	it('returns null when the matching status has no target_url', async () => {
-		const client = clientReturning({
-			state: 'success',
-			statuses: [{ context: 'Vercel', state: 'success', target_url: null }],
-		});
-		const id = await resolveDeploymentId(client, {
-			owner: 'o',
-			repo: 'r',
-			sha: 'x',
-			context: 'Vercel',
-		});
-		expect(id).toBeNull();
-	});
-
-	it('returns null when target_url is unparseable', async () => {
-		const client = clientReturning({
-			state: 'success',
-			statuses: [
-				{ context: 'Vercel', state: 'success', target_url: 'not a url' },
-			],
-		});
-		const id = await resolveDeploymentId(client, {
-			owner: 'o',
-			repo: 'r',
-			sha: 'x',
-			context: 'Vercel',
-		});
-		expect(id).toBeNull();
+	it('rejects deployment app URLs and malformed dashboard URLs', () => {
+		expect(
+			deploymentIdFromTargetUrl('https://workflow-server-abc123.vercel.app'),
+		).toBeNull();
+		expect(
+			deploymentIdFromTargetUrl('https://vercel.com/team/project'),
+		).toBeNull();
+		expect(deploymentIdFromTargetUrl('not a url')).toBeNull();
 	});
 });
-
-// Avoid a vitest warning about an unused import:
-void vi;

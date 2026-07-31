@@ -26,18 +26,6 @@ export interface GitHubDeploymentStatus {
 	updated_at: string;
 }
 
-export interface GitHubCommitStatus {
-	context: string;
-	state: string;
-	target_url?: string | null;
-	description?: string | null;
-}
-
-export interface GitHubCombinedStatus {
-	state: string;
-	statuses: GitHubCommitStatus[];
-}
-
 interface RepoRef {
 	owner: string;
 	repo: string;
@@ -76,14 +64,6 @@ export class GitHubClient {
 		return await this.#json<GitHubDeploymentStatus[]>(url);
 	}
 
-	async getCombinedStatus(
-		params: RepoRef & { ref: string; perPage?: number },
-	): Promise<GitHubCombinedStatus> {
-		const { owner, repo, ref, perPage = 100 } = params;
-		const url = `${API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(ref)}/status?per_page=${perPage}`;
-		return await this.#json<GitHubCombinedStatus>(url);
-	}
-
 	async #json<T>(url: string): Promise<T> {
 		const res = await this.#fetch(url, {
 			headers: {
@@ -104,37 +84,35 @@ export class GitHubClient {
 }
 
 const VERCEL_DEPLOYMENT_ID_PREFIX = 'dpl_';
+const VERCEL_DASHBOARD_HOST = 'vercel.com';
+const VERCEL_INSPECTOR_ID = /^[A-Za-z0-9]+$/;
 
 /**
- * Look up the Vercel deployment ID from the commit's combined status.
- * Vercel posts a per-project commit status with a `target_url` of the
- * form `https://vercel.com/<team>/<project>/<inspectorId>`; the
- * inspector ID is the deployment ID without the `dpl_` prefix.
+ * Extract the deployment ID from a Vercel dashboard deployment URL.
+ *
+ * Deployment statuses are scoped to one GitHub Deployment, so an ID carried
+ * by that status is guaranteed to describe the same deployment as its
+ * `environment_url`.
  */
-export async function resolveDeploymentId(
-	client: GitHubClient,
-	params: {
-		owner: string;
-		repo: string;
-		sha: string;
-		context: string;
-	},
-): Promise<string | null> {
-	const status = await client.getCombinedStatus({
-		owner: params.owner,
-		repo: params.repo,
-		ref: params.sha,
-	});
-	const match = status.statuses.find((s) => s.context === params.context);
-	if (!match?.target_url) return null;
-	let pathname: string;
+export function deploymentIdFromTargetUrl(
+	targetUrl: string | null | undefined,
+): string | null {
+	if (!targetUrl) return null;
+	let url: URL;
 	try {
-		pathname = new URL(match.target_url).pathname;
+		url = new URL(targetUrl);
 	} catch {
 		return null;
 	}
-	const segments = pathname.split('/').filter(Boolean);
+	if (url.hostname !== VERCEL_DASHBOARD_HOST) return null;
+	const segments = url.pathname.split('/').filter(Boolean);
 	const inspectorId = segments.at(-1);
-	if (!inspectorId) return null;
+	if (
+		segments.length < 3 ||
+		!inspectorId ||
+		!VERCEL_INSPECTOR_ID.test(inspectorId)
+	) {
+		return null;
+	}
 	return `${VERCEL_DEPLOYMENT_ID_PREFIX}${inspectorId}`;
 }

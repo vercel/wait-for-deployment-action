@@ -1,10 +1,10 @@
 import { resolveConfig } from './config.ts';
 import * as core from './core.ts';
 import {
+	deploymentIdFromTargetUrl,
 	GitHubClient,
 	type GitHubDeployment,
 	type GitHubDeploymentStatus,
-	resolveDeploymentId,
 } from './github.ts';
 
 const sleep = (ms: number) =>
@@ -39,13 +39,7 @@ export async function run(deps: RunDeps = {}): Promise<void> {
 		core.info(
 			`Looking for GitHub deployment in environment "${config.environmentName}"`,
 		);
-		if (config.statusContext) {
-			core.info(
-				`Will resolve deployment ID from "${config.statusContext}" commit status`,
-			);
-		} else {
-			core.info('Deployment ID resolution disabled (status-context is empty)');
-		}
+		core.info('Will resolve deployment ID from the GitHub deployment status');
 		core.info(
 			`Timeout: ${config.timeout}s, Check interval: ${config.checkInterval}s`,
 		);
@@ -125,7 +119,8 @@ export async function run(deps: RunDeps = {}): Promise<void> {
 				continue;
 			}
 
-			const deploymentUrl = latest.environment_url || latest.target_url;
+			const statusDeploymentId = deploymentIdFromTargetUrl(latest.target_url);
+			const deploymentUrl = latest.environment_url;
 			if (!deploymentUrl) {
 				core.warning(
 					`Deployment status was "${latest.state}" but had no environment_url; retrying`,
@@ -134,35 +129,18 @@ export async function run(deps: RunDeps = {}): Promise<void> {
 				continue;
 			}
 
-			// 3. Resolve the provider deployment ID from the commit status.
-			let deploymentId = '';
-			if (config.statusContext) {
-				try {
-					const resolved = await resolveDeploymentId(client, {
-						owner: config.owner,
-						repo: config.repo,
-						sha: config.sha,
-						context: config.statusContext,
-					});
-					if (resolved) {
-						deploymentId = resolved;
-					} else if (config.requireDeploymentId) {
-						throw new Error(
-							`Deployment became ready at ${deploymentUrl}, but the deployment ID could not be resolved from the "${config.statusContext}" commit status`,
-						);
-					} else {
-						core.warning(
-							`No "${config.statusContext}" commit status with a target_url found; deployment-id will be empty.`,
-						);
-					}
-				} catch (err) {
-					// Re-throw the "required but unresolved" error; warn on
-					// transport failures so the rest of the run still emits.
-					if (config.requireDeploymentId) throw err;
-					core.warning(
-						`Failed to resolve deployment ID: ${(err as Error).message}`,
-					);
-				}
+			// 3. Resolve the provider deployment ID from this exact deployment
+			// status. Its target_url is the dashboard URL for environment_url.
+			const deploymentId = statusDeploymentId ?? '';
+			if (!deploymentId && config.requireDeploymentId) {
+				throw new Error(
+					`Deployment became ready at ${deploymentUrl}, but its status target_url did not identify a Vercel dashboard deployment`,
+				);
+			}
+			if (!deploymentId) {
+				core.warning(
+					'Deployment status target_url did not identify a Vercel dashboard deployment; deployment-id will be empty.',
+				);
 			}
 
 			core.info(`Deployment ready: ${deploymentUrl}`);
