@@ -5,12 +5,23 @@ export interface Config {
 	owner: string;
 	repo: string;
 	sha: string;
+	/** The logical environment asked for, before name composition. */
+	environment: 'production' | 'preview';
 	environmentName: string;
+	/**
+	 * Whether `environmentName` came from the `environment-name` escape hatch
+	 * rather than being composed from `environment` + `project-slug`. When it
+	 * did, `environment` no longer describes what the caller is waiting for, so
+	 * the environment check against the Vercel API target is skipped.
+	 */
+	environmentNameOverridden: boolean;
 	statusContext: string;
 	requireDeploymentId: boolean;
 	timeout: number;
 	checkInterval: number;
 	githubToken: string;
+	vercelToken: string;
+	vercelTeamId: string;
 }
 
 /**
@@ -42,8 +53,9 @@ export function resolveConfig(): Config {
 	// `status-context` follows the same empty-string-means-auto convention
 	// as `environment-name`: empty (the action.yml default) → compose from
 	// project-slug; non-empty → use the override as-is. Consumers that don't
-	// want deployment-id resolution at all should set `require-deployment-id:
-	// false` and not read the `deployment-id` output.
+	// need the ID should set `require-deployment-id: false` and not read the
+	// `deployment-id` output — resolution is still attempted, but a failure
+	// only warns.
 	const statusContext =
 		statusContextOverride || composeStatusContext(projectSlug);
 
@@ -60,6 +72,17 @@ export function resolveConfig(): Config {
 	if (!githubToken) {
 		throw new Error('github-token input or GITHUB_TOKEN env var is required');
 	}
+	// Read from the inputs only — deliberately *not* from ambient `VERCEL_TOKEN`
+	// / `VERCEL_TEAM_ID` env vars, unlike `github-token` above. A token switches
+	// deployment-id resolution from the commit status to the Vercel API, and
+	// that switch should be a visible choice at the call site: `VERCEL_TOKEN` is
+	// a common job-level env var in Vercel-adjacent CI, so falling back to it
+	// would flip resolution modes (and, for a team-owned project with no
+	// `vercel-team-id`, turn a green job into a 404 failure) on workflows that
+	// never asked for it. `github-token` is different: it's required, means one
+	// thing, and changes no behavior.
+	const vercelToken = core.getInput('vercel-token');
+	const vercelTeamId = core.getInput('vercel-team-id');
 
 	const { owner, repo } = getRepo();
 	const sha = core.getInput('sha').trim() || resolveTargetSha();
@@ -68,12 +91,16 @@ export function resolveConfig(): Config {
 		owner,
 		repo,
 		sha,
+		environment,
 		environmentName,
+		environmentNameOverridden: Boolean(envNameOverride),
 		statusContext,
 		requireDeploymentId,
 		timeout,
 		checkInterval,
 		githubToken,
+		vercelToken,
+		vercelTeamId,
 	};
 }
 
@@ -83,6 +110,24 @@ export function composeEnvironmentName(
 ): string {
 	const base = environment === 'production' ? 'Production' : 'Preview';
 	return projectSlug ? `${base} – ${projectSlug}` : base;
+}
+
+/**
+ * The same environment name with `Production` and `Preview` swapped —
+ * `"Production – my-app"` becomes `"Preview – my-app"`. Used to check whether
+ * the commit was *also* deployed to the other environment of the same project,
+ * which is the precondition for the commit status being ambiguous.
+ *
+ * Returns `null` for names that don't follow Vercel's convention (a
+ * hand-written `environment-name`), where no counterpart can be derived.
+ */
+export function counterpartEnvironmentName(
+	environmentName: string,
+): string | null {
+	const match = environmentName.match(/^(Production|Preview)(?=$|\s)/);
+	if (!match?.[1]) return null;
+	const base = match[1] === 'Production' ? 'Preview' : 'Production';
+	return `${base}${environmentName.slice(match[1].length)}`;
 }
 
 export function composeStatusContext(projectSlug: string): string {

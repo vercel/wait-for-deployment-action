@@ -1,4 +1,8 @@
-import { resolveConfig } from './config.ts';
+import {
+	type Config,
+	counterpartEnvironmentName,
+	resolveConfig,
+} from './config.ts';
 import * as core from './core.ts';
 import {
 	GitHubClient,
@@ -6,6 +10,13 @@ import {
 	type GitHubDeploymentStatus,
 	resolveDeploymentId,
 } from './github.ts';
+import {
+	assertEnvironmentMatches,
+	describeTarget,
+	EnvironmentMismatchError,
+	getDeploymentByHost,
+	hostFromDeploymentUrl,
+} from './vercel.ts';
 
 const sleep = (ms: number) =>
 	new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -20,6 +31,8 @@ export interface RunDeps {
 	sleep?: (ms: number) => Promise<void>;
 	/** Pre-built GitHub client (used in tests to inject fixtures). */
 	client?: GitHubClient;
+	/** Override for the Vercel API transport (used in tests). */
+	vercelFetch?: typeof fetch;
 }
 
 /**
@@ -39,9 +52,17 @@ export async function run(deps: RunDeps = {}): Promise<void> {
 		core.info(
 			`Looking for GitHub deployment in environment "${config.environmentName}"`,
 		);
-		if (config.statusContext) {
+		if (config.vercelToken) {
 			core.info(
-				`Will resolve deployment ID from "${config.statusContext}" commit status`,
+				'Will resolve the deployment ID from the Vercel API, keyed on the deployment URL',
+			);
+		} else if (config.statusContext) {
+			core.info(
+				`Will resolve the deployment ID from the "${config.statusContext}" commit status${
+					config.requireDeploymentId
+						? ''
+						: ' (best effort: `require-deployment-id` is false, so a failure to resolve only warns)'
+				}`,
 			);
 		} else {
 			core.info('Deployment ID resolution disabled (status-context is empty)');
@@ -134,19 +155,21 @@ export async function run(deps: RunDeps = {}): Promise<void> {
 				continue;
 			}
 
-			// 3. Resolve the provider deployment ID from the commit status.
+			// 3. Resolve the provider deployment ID for that exact URL.
 			let deploymentId = '';
-			if (config.statusContext) {
+			if (config.vercelToken || config.statusContext) {
 				try {
-					const resolved = await resolveDeploymentId(client, {
-						owner: config.owner,
-						repo: config.repo,
-						sha: config.sha,
-						context: config.statusContext,
-					});
+					const resolved = await resolveDeploymentIdFor(
+						client,
+						config,
+						deploymentUrl,
+						deps.vercelFetch,
+					);
 					if (resolved) {
 						deploymentId = resolved;
 					} else if (config.requireDeploymentId) {
+						// Only the commit-status path can come back empty; the
+						// Vercel API path either resolves or throws.
 						throw new Error(
 							`Deployment became ready at ${deploymentUrl}, but the deployment ID could not be resolved from the "${config.statusContext}" commit status`,
 						);
@@ -156,6 +179,11 @@ export async function run(deps: RunDeps = {}): Promise<void> {
 						);
 					}
 				} catch (err) {
+					// An environment mismatch is always fatal: it means the URL
+					// we were about to emit isn't the environment that was asked
+					// for, so suppressing it would hand downstream steps a
+					// plausible but wrong deployment.
+					if (err instanceof EnvironmentMismatchError) throw err;
 					// Re-throw the "required but unresolved" error; warn on
 					// transport failures so the rest of the run still emits.
 					if (config.requireDeploymentId) throw err;
@@ -179,4 +207,109 @@ export async function run(deps: RunDeps = {}): Promise<void> {
 	} catch (error) {
 		core.setFailed(error instanceof Error ? error.message : String(error));
 	}
+}
+
+/**
+ * Resolve the Vercel deployment ID of the deployment serving `deploymentUrl`,
+ * or `''` when it can't be determined.
+ *
+ * With a `vercel-token` this is exact: the URL's host is looked up against the
+ * Vercel API, so `deployment-id` and `deployment-url` always describe the same
+ * deployment, and the deployment's environment is verified.
+ *
+ * Without one it falls back to the commit status, which is per-project rather
+ * than per-environment and can therefore name a different deployment of the
+ * same commit. See `src/vercel.ts` for the full failure mode.
+ */
+async function resolveDeploymentIdFor(
+	client: GitHubClient,
+	config: Config,
+	deploymentUrl: string,
+	vercelFetch?: typeof fetch,
+): Promise<string> {
+	if (config.vercelToken) {
+		const host = hostFromDeploymentUrl(deploymentUrl);
+		const deployment = await getDeploymentByHost(host, {
+			token: config.vercelToken,
+			teamId: config.vercelTeamId,
+			...(vercelFetch ? { fetchImpl: vercelFetch } : {}),
+		});
+
+		if (config.environmentNameOverridden) {
+			core.info(
+				`Skipping the environment check: \`environment-name\` was set explicitly, so the intended Vercel target is ambiguous. Resolved target: ${describeTarget(deployment.target)}.`,
+			);
+		} else {
+			assertEnvironmentMatches(deployment, config.environment, host);
+			core.info(
+				`Verified ${host} is a ${describeTarget(deployment.target)} deployment, matching the requested "${config.environment}" environment`,
+			);
+		}
+		return deployment.id;
+	}
+
+	if (!config.statusContext) return '';
+	await noteCommitStatusAmbiguity(client, config);
+	return (
+		(await resolveDeploymentId(client, {
+			owner: config.owner,
+			repo: config.repo,
+			sha: config.sha,
+			context: config.statusContext,
+		})) ?? ''
+	);
+}
+
+/**
+ * Report that the commit-status fallback can name the wrong deployment.
+ *
+ * The status is only actually ambiguous when this commit was deployed to more
+ * than one environment of the project, so the severity follows that check: a
+ * warning when the risk is real or can't be ruled out, and an informational
+ * line when it's ruled out — otherwise every tokenless run of a
+ * single-environment commit would carry a warning annotation for a hazard that
+ * was just checked and found absent. The check costs one extra GitHub call
+ * (`deployments: read`, already required) and never fails the run.
+ */
+async function noteCommitStatusAmbiguity(
+	client: GitHubClient,
+	config: Config,
+): Promise<void> {
+	const shared = `Vercel keeps a single "${config.statusContext}" commit status per project rather than per environment, overwritten by whichever deployment finished last, so the deployment-id read from it can belong to a different deployment than deployment-url.`;
+	const advice =
+		'The durable fix is to stop deploying one commit to multiple environments of this project (typically two branches pointing at the same SHA). If you already hold a Vercel access token, `vercel-token` (plus `vercel-team-id` for team-owned projects) resolves the ID from `deployment-url` instead, which cannot disagree.';
+
+	const counterpart = counterpartEnvironmentName(config.environmentName);
+	// A hand-written `environment-name` has no derivable counterpart, so
+	// there's no cheap way to rule the hazard out.
+	if (!counterpart) {
+		core.warning(`${shared} ${advice}`);
+		return;
+	}
+
+	let alsoDeployed: GitHubDeployment[];
+	try {
+		alsoDeployed = await client.listDeployments({
+			owner: config.owner,
+			repo: config.repo,
+			sha: config.sha,
+			environment: counterpart,
+		});
+	} catch (err) {
+		core.warning(
+			`${shared} Could not check whether ${config.sha} was also deployed to "${counterpart}": ${(err as Error).message}. ${advice}`,
+		);
+		return;
+	}
+
+	if (alsoDeployed.length > 0) {
+		core.warning(
+			`Commit ${config.sha} was deployed to both "${config.environmentName}" and "${counterpart}". ${shared} ${advice}`,
+		);
+		return;
+	}
+
+	core.info(
+		`Resolving deployment-id from the "${config.statusContext}" commit status. ${config.sha} was not deployed to "${counterpart}", so that status is unambiguous for this commit.`,
+	);
 }

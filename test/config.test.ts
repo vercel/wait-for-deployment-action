@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
 	composeEnvironmentName,
 	composeStatusContext,
+	counterpartEnvironmentName,
 	resolveConfig,
 } from '../src/config.ts';
 
@@ -42,6 +43,29 @@ describe('composeStatusContext', () => {
 	});
 });
 
+describe('counterpartEnvironmentName', () => {
+	it('swaps Production and Preview, keeping the project suffix', () => {
+		expect(counterpartEnvironmentName('Production – my-app')).toBe(
+			'Preview – my-app',
+		);
+		expect(counterpartEnvironmentName('Preview – my-app')).toBe(
+			'Production – my-app',
+		);
+	});
+
+	it('swaps the bare single-project names', () => {
+		expect(counterpartEnvironmentName('Production')).toBe('Preview');
+		expect(counterpartEnvironmentName('Preview')).toBe('Production');
+	});
+
+	it('returns null for names that do not follow the convention', () => {
+		expect(counterpartEnvironmentName('My Custom Env')).toBeNull();
+		expect(counterpartEnvironmentName('')).toBeNull();
+		// Must match the whole leading word, not a prefix of one.
+		expect(counterpartEnvironmentName('Productionish')).toBeNull();
+	});
+});
+
 describe('resolveConfig', () => {
 	beforeEach(() => {
 		// Wipe all INPUT_* and GH-managed env vars to a known baseline.
@@ -52,6 +76,8 @@ describe('resolveConfig', () => {
 		process.env.GITHUB_SHA = '1111111111111111111111111111111111111111';
 		delete process.env.GITHUB_EVENT_NAME;
 		delete process.env.GITHUB_EVENT_PATH;
+		delete process.env.VERCEL_TOKEN;
+		delete process.env.VERCEL_TEAM_ID;
 		setInputs({ 'github-token': 'ghs_test' });
 	});
 
@@ -160,5 +186,54 @@ describe('resolveConfig', () => {
 		setInputs({ 'github-token': '' });
 		delete process.env.GITHUB_TOKEN;
 		expect(() => resolveConfig()).toThrow(/github-token/);
+	});
+
+	it('exposes the logical environment alongside the composed name', () => {
+		setInputs({ environment: 'production', 'project-slug': 'my-app' });
+		const cfg = resolveConfig();
+		expect(cfg.environment).toBe('production');
+		expect(cfg.environmentName).toBe('Production – my-app');
+		expect(cfg.environmentNameOverridden).toBe(false);
+	});
+
+	it('flags an environment-name override', () => {
+		setInputs({ 'environment-name': 'Custom Env' });
+		expect(resolveConfig().environmentNameOverridden).toBe(true);
+	});
+
+	it('reads the Vercel credentials from inputs', () => {
+		setInputs({ 'vercel-token': 'vercel_abc', 'vercel-team-id': 'team_abc' });
+		const cfg = resolveConfig();
+		expect(cfg.vercelToken).toBe('vercel_abc');
+		expect(cfg.vercelTeamId).toBe('team_abc');
+	});
+
+	it('ignores ambient VERCEL_TOKEN / VERCEL_TEAM_ID env vars', () => {
+		// A token switches deployment-id resolution modes; that switch must be
+		// an explicit choice at the call site, not something an ambient
+		// job-level env var flips on a pin bump.
+		process.env.VERCEL_TOKEN = 'vercel_env';
+		process.env.VERCEL_TEAM_ID = 'team_env';
+		const cfg = resolveConfig();
+		expect(cfg.vercelToken).toBe('');
+		expect(cfg.vercelTeamId).toBe('');
+	});
+
+	it('reads the credentials from inputs even when ambient env vars are set', () => {
+		process.env.VERCEL_TOKEN = 'vercel_env';
+		process.env.VERCEL_TEAM_ID = 'team_env';
+		setInputs({
+			'vercel-token': 'vercel_input',
+			'vercel-team-id': 'team_input',
+		});
+		const cfg = resolveConfig();
+		expect(cfg.vercelToken).toBe('vercel_input');
+		expect(cfg.vercelTeamId).toBe('team_input');
+	});
+
+	it('leaves the Vercel credentials empty by default', () => {
+		const cfg = resolveConfig();
+		expect(cfg.vercelToken).toBe('');
+		expect(cfg.vercelTeamId).toBe('');
 	});
 });

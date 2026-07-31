@@ -24,6 +24,10 @@ inputs:
       Which Vercel deployment environment to wait for: "production" or
       "preview". Defaults to "preview".
 
+      When `vercel-token` is set, the resolved deployment's Vercel
+      target is verified against this value and the action fails if they
+      disagree.
+
       Ignored when `environment-name` is set.
     required: false
     default: 'preview'
@@ -33,6 +37,10 @@ inputs:
       environment name exactly (e.g. "Preview", "Production",
       "Preview – my-project"). When set, this takes precedence over the
       auto-composed name derived from `environment` + `project-slug`.
+
+      Setting this also disables the environment verification that
+      `vercel-token` otherwise performs, because the intended Vercel
+      target can no longer be derived from `environment`.
 
       You normally don't need this — set `project-slug` instead.
     required: false
@@ -44,16 +52,30 @@ inputs:
       "Vercel – my-project"). When set, this takes precedence over the
       auto-composed value.
 
-      To skip deployment-id resolution entirely, set
+      Only consulted when `vercel-token` is not set.
+
+      If you only need `deployment-url`, set
       `require-deployment-id: false` and ignore the `deployment-id`
-      output.
+      output. Resolution is still attempted (best effort), so the
+      `statuses: read` permission is still worth granting.
     required: false
     default: ''
   require-deployment-id:
     description: |
-      Whether to fail when the Vercel deployment ID cannot be resolved
-      from the commit status. Defaults to "true". Set to "false" if you
-      only need `deployment-url` and don't care about `deployment-id`.
+      Whether to fail when the Vercel deployment ID cannot be resolved.
+      Defaults to "true". Set to "false" if you only need
+      `deployment-url` and don't care about `deployment-id`.
+
+      This downgrades a failed resolution to a warning; it does not skip
+      resolution. The ID is still looked up and still emitted when it
+      can be determined, so consumers reading it opportunistically keep
+      working.
+
+      Note that this does not suppress an environment mismatch: when
+      `vercel-token` is set and the resolved deployment turns out to be
+      in a different environment than `environment` asked for, the
+      action always fails, because that means `deployment-url` itself is
+      not the deployment you asked for.
     required: false
     default: 'true'
   timeout:
@@ -76,15 +98,51 @@ inputs:
       GitHub token used to query the Deployments / Statuses APIs.
       Defaults to the job's automatic GITHUB_TOKEN. The workflow's
       `permissions:` block must include `deployments: read` (always)
-      and `statuses: read` (when resolving deployment ID).
+      and `statuses: read` (when resolving deployment ID without vercel-token).
     required: false
     default: ${{ github.token }}
+  vercel-token:
+    description: |
+      Optional escape hatch. Most consumers should not need this, and
+      this action is deliberately designed not to require a Vercel
+      access token — leave it unset unless you already hold one for
+      other reasons.
+
+      By default the deployment ID is parsed out of the
+      "Vercel – <project>" commit status, which Vercel maintains per
+      project rather than per environment. That is unambiguous as long
+      as a commit is deployed to one environment of the project; when
+      the same commit is deployed to several, the ID can belong to a
+      different deployment than `deployment-url`, and the action checks
+      for that case and warns.
+
+      When this token is set, the ID is instead resolved by looking up
+      the deployment URL against the Vercel API, so `deployment-id` and
+      `deployment-url` are guaranteed to describe the same deployment,
+      and the deployment's environment is verified against
+      `environment`.
+
+      Read-only scope is enough. Not read from the `VERCEL_TOKEN`
+      environment variable: switching resolution modes should be a
+      visible choice at the call site.
+    required: false
+    default: ''
+  vercel-team-id:
+    description: |
+      Vercel team ID (`team_...`) that owns the project. Only used
+      alongside `vercel-token`, where it is required for team-owned
+      projects: the Vercel API answers 404 for a team's deployments
+      when the request isn't scoped to that team.
+
+      Not read from the `VERCEL_TEAM_ID` environment variable.
+    required: false
+    default: ''
 
 outputs:
   deployment-url:
     description: 'URL of the ready Vercel deployment (the GitHub Deployment status `environment_url`, falling back to `target_url`).'
   deployment-id:
-    description: 'Vercel deployment ID resolved from the commit status (e.g. `dpl_8z4XjwrRQGYwcDKFMLN5BeTvGhXu`). Empty if resolution failed and `require-deployment-id` is "false".'
+    description: 'Vercel deployment ID of the deployment serving `deployment-url` (e.g. `dpl_8z4XjwrRQGYwcDKFMLN5BeTvGhXu`). Empty if resolution failed and `require-deployment-id` is "false".'
   deployment-state:
     description: 'The terminal GitHub Deployment status state ("success" or "inactive").'
 
